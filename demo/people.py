@@ -95,6 +95,11 @@ class Seen:
     name: str | None
     score: float
     box: list[float] | None
+    # Someone the robot cannot name has just come into view — a face that is
+    # clearly nobody it has met (FaceMemory's is_new), or any face it does not
+    # recognise after the view was empty: whoever was talking before, this is
+    # someone else. True on the turn they appear, not on every turn they stay.
+    stranger_arrived: bool = False
 
     @property
     def known(self) -> bool:
@@ -116,17 +121,50 @@ class People:
         self._greeted: set[str] = set()
         self._clock = clock
         self._here: str | None = None      # named, and still in view
+        self._stranger_in_view = False     # someone unnamed, not yet named
+        self._view_emptied = False         # nobody in view for FACE_GONE_S
+        self._in_view_as_it_turned = False
         self._face_last_seen = float("-inf")
+        self._emptied_after: float | None = None   # the spell already noticed
         self._learned: dict[str, int] = {}   # poses learned, per person
 
     def face_seen(self) -> None:
         """A face is in the camera now — from the detect loop (demo/run_demo.py's
         FaceTracker), several times a second. A gap longer than FACE_GONE_S
         means whoever is there now may be someone else."""
-        now = self._clock()
-        if now - self._face_last_seen > FACE_GONE_S:
-            self._here = None
-        self._face_last_seen = now
+        self._notice_an_empty_view()
+        self._face_last_seen = self._clock()
+
+    def _notice_an_empty_view(self) -> None:
+        """Nobody in view for FACE_GONE_S, after someone was (the run's first
+        face follows nobody): whoever comes next is someone new to this moment
+        — not the person named before, not the stranger whose face was being
+        collected (those shots are theirs, never the next person's), and a
+        name question asked of someone who left has no answer. Noticed when a
+        face comes back, and on a turn that sees no face at all; once a spell."""
+        last = self._face_last_seen
+        if (last == float("-inf") or last == self._emptied_after
+                or self._clock() - last <= FACE_GONE_S):
+            return
+        self._emptied_after = last
+        self._here = None
+        self._stranger_in_view = False
+        self._shots.clear()
+        self.awaiting_name = False
+        self._view_emptied = True
+
+    def look_away(self) -> None:
+        """The robot is turning its head on purpose (demo/run_demo.py's
+        Looker): note whether the person was still in view as it turned."""
+        self._in_view_as_it_turned = (self._clock() - self._face_last_seen
+                                      <= FACE_GONE_S)
+
+    def look_back(self) -> None:
+        """The head is back: the time it was turned is no gap — for a person
+        who was there as it turned. One who had already left stays gone."""
+        if self._in_view_as_it_turned:
+            self._face_last_seen = self._clock()
+        self._in_view_as_it_turned = False
 
     @property
     def enabled(self) -> bool:
@@ -135,21 +173,22 @@ class People:
     def observe(self, frame) -> Seen:
         """Look once: who is in front of the robot right now."""
         if not self.enabled or frame is None:
-            return self.current
+            return self._unchanged()
         try:
             faces = self._reader.read(frame)
         except Exception as exc:  # noqa: BLE001 — a turn must not hang on this
             print(f"  [faces] skip ({type(exc).__name__}: {exc})")
-            return self.current
+            return self._unchanged()
         face = next((f for f in faces if f.get("embedding")), None)
         if face is None:
             # No face to match this turn (turned away, too far, a bad frame) —
             # but if one was in the camera moments ago, it is still the person
             # the robot is talking to, and the picture it sends the model
             # should carry their name (demo/conversation.py's names_fn).
+            self._notice_an_empty_view()
             box = faces[0]["box"] if faces else None
-            self.current = (Seen(self._here, 0.0, box) if self._still_here()
-                            else Seen(None, 0.0, box))
+            self.current = Seen(self._here if self._still_here() else None, 0.0, box,
+                                stranger_arrived=self._unknown_after_an_empty_view())
             return self.current
         self.face_seen()
         match = self._memory.recognize(face["embedding"])
@@ -159,20 +198,52 @@ class People:
         here = self._here
         if self._tracked_at_a_bad_angle(match, here):
             return self._still_the_same_person(face, match.score, here)
-        if not match.known:
-            # Not the tracked person at a bad angle, and nobody known: whoever
-            # this is, the person named before is not the one in front — and a
-            # later frame must not bring their name back to this face.
-            self._here = None
+        arrived = False
         if match.known:
             self._here = match.name
+            self._stranger_in_view = False
+            self._view_emptied = False
             self._shots.clear()
-        elif match.is_new and len(self._shots) < self._shots_wanted:
-            # Collect while the person is here; enrollment needs several poses.
-            self._shots.append(face["embedding"])
+        else:
+            # Nobody known, and not the tracked person at a bad angle (above):
+            # someone unnamed — a clear stranger, or a face too close to call.
+            # The person named before is not the one in front any more,
+            # whatever the next frame shows. It is an arrival unless the same
+            # unnamed person was already in view (the detect loop's face_seen
+            # ends that when the view has been empty long enough).
+            arrived = not self._stranger_in_view
+            self._stranger_in_view = True
+            self._view_emptied = False
+            self._here = None
+            if match.is_new and len(self._shots) < self._shots_wanted:
+                # Collect while the person is here; enrollment needs several poses.
+                self._shots.append(face["embedding"])
         self.current = Seen(match.name if match.known else None,
-                            match.score, face["box"])
+                            match.score, face["box"], stranger_arrived=arrived)
         return self.current
+
+    def _unchanged(self) -> Seen:
+        """No face could be read this turn: whoever is still in view still
+        is — and after an empty view, it is someone unknown, not the last
+        person named. An arrival counts on the turn it happened, not again."""
+        self._notice_an_empty_view()
+        self.current = Seen(self._here if self._still_here() else None, 0.0,
+                            self.current.box,
+                            stranger_arrived=self._unknown_after_an_empty_view())
+        return self.current
+
+    def _unknown_after_an_empty_view(self) -> bool:
+        """The first unrecognised sighting after the view was empty: someone
+        new to this moment, so the last person's name does not carry over."""
+        if not self._view_emptied:
+            return False
+        self._view_emptied = False
+        # Someone the camera can see stays "the unnamed person in view"; a
+        # voice from outside the picture does not — the next face to step in
+        # is its own arrival, not taken for them.
+        self._stranger_in_view = (self._clock() - self._face_last_seen
+                                  <= FACE_GONE_S)
+        return True
 
     def in_frame(self, frame) -> list[dict]:
         """Who is in a frame: [{"name", "box", "score"}], largest face first,
@@ -309,6 +380,7 @@ class People:
         self._shots.clear()
         self._greeted.add(name)
         self._here = name
+        self._stranger_in_view = False
         print(f"  people:  met {name} ({stored} shot(s)) -> Qdrant Edge")
         self.current = Seen(name, 1.0, self.current.box)
         return name, GREET_NEW.format(name=name)

@@ -1710,6 +1710,50 @@ class _People:
         return self._answer
 
 
+def test_a_stranger_in_front_does_not_inherit_the_last_persons_name(monkeypatch):
+    from demo.conversation import ConversationWindow
+    from demo.people import Seen
+
+    window = ConversationWindow()
+    window.set_speaker("Alice")
+    people = _People()
+    people.current = Seen(None, 0.05, [0.3, 0.2, 0.6, 0.7], stranger_arrived=True)
+    _turn(monkeypatch, "Hello there.", _said("Hi!"), conversation=window,
+          people=people, frame=np.zeros((4, 4, 3), np.uint8))
+    assert window.speaker is None
+    assert [e.text for e in window._exchanges] == ["Person: Hello there. — Reachy: Hi!"]
+
+
+def test_alice_then_a_stranger_who_answers_reaches_memory_under_each_name(monkeypatch):
+    # The whole way through the voice loop: Alice is recognised, steps away,
+    # a stranger steps in, talks, is asked their name and answers "Bob".
+    from demo.conversation import ConversationWindow
+    from demo.people import Seen
+
+    class _Remembered:
+        def __init__(self):
+            self.texts = []
+
+        def remember(self, text, kind=None, meta=None):
+            self.texts.append(text)
+
+    memory = _Remembered()
+    window = ConversationWindow(memory)
+    frame = np.zeros((4, 4, 3), np.uint8)
+    alice = _People(name="Alice", box=[0.3, 0.2, 0.6, 0.7])
+    _turn(monkeypatch, "My dog is called Rex.", _said("Lovely name!"),
+          conversation=window, people=alice, frame=frame)
+    stranger = _People(ask=True, answer=("Bob", "Nice to meet you, Bob."))
+    stranger.current = Seen(None, 0.05, [0.3, 0.2, 0.6, 0.7], stranger_arrived=True)
+    _turn(monkeypatch, "I like trains.", _said("Me too!"),
+          conversation=window, people=stranger, frame=frame)
+    assert stranger.asked
+    stranger.current = Seen(None, 0.05, [0.3, 0.2, 0.6, 0.7])   # still there
+    _turn(monkeypatch, "I'm Bob.", conversation=window, people=stranger, frame=frame)
+    window.flush()
+    assert [text.split(":")[0] for text in memory.texts] == ["Alice", "Bob"]
+
+
 def test_a_recognised_person_is_greeted_and_named_in_memory(monkeypatch):
     from demo.conversation import ConversationWindow
 
@@ -1989,6 +2033,9 @@ def test_a_look_reads_who_is_in_THAT_picture_not_the_one_the_turn_started_with()
             return [{"name": "Masha", "box": [0.1, 0.1, 0.2, 0.2], "score": 0.8},
                     {"name": None, "box": [0.5, 0.1, 0.6, 0.2], "score": 0.1}]
 
+        def look_away(self):
+            pass
+
     memory, people = _LookMemory(), _People()
     looker = Looker(_LookRobot(), _LookSource(np.zeros((4, 4, 3), np.uint8)), None,
                     memory, settle_s=0.0, sleep=lambda s: None, people=people)
@@ -2158,7 +2205,47 @@ def test_the_tracker_tells_people_a_face_is_still_there_and_a_look_does_not_brea
     tracker()
     assert people.seen == 1, "while the head looks away, nothing is concluded"
     tracker.release()
-    assert people.seen == 2, "the person did not leave; the head did"
+    assert people.seen == 1, "and coming back marks no face nobody saw"
+    tracker()
+    assert people.seen == 2
+
+    # Paused from the dashboard, facing the room: the head keeps still, but
+    # the faces in view are still the people in front of it.
+    faces[0] = [{"box": [0.4, 0.2, 0.6, 0.5], "score": 0.9}]
+    tracker.hold(watching=True)
+    tracker()
+    assert people.seen == 3
+    faces[0] = []
+    tracker()
+    tracker.release()
+    assert people.seen == 3, "an empty room is not stamped as a face on resume"
+
+
+def test_coming_back_from_a_look_tells_people_the_person_did_not_leave():
+    class _Kept:
+        enabled = False
+        calls = []
+
+        def look_away(self):
+            self.calls.append("away")
+
+        def look_back(self):
+            self.calls.append("back")
+
+    people = _Kept()
+    looker = Looker_with(people)
+    looker.look("left")
+    looker.come_back(None)
+    assert people.calls == ["away", "back"]
+
+
+def Looker_with(people):
+    import numpy as np
+
+    from demo.run_demo import Looker
+
+    return Looker(_LookRobot(), _LookSource(np.zeros((4, 4, 3), np.uint8)), None,
+                  None, settle_s=0.0, sleep=lambda s: None, people=people)
 
 
 def test_a_look_ahead_takes_the_picture_without_turning_or_waiting():

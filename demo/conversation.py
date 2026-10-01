@@ -100,12 +100,20 @@ def speaker_name(heard: str) -> str | None:
     name = match.group(1)
     return None if name in _NOT_A_NAME else name
 
+
+# How an exchange nobody was named for is written (Exchange.text).
+UNNAMED_LABEL = "Person"
+
+
 @dataclasses.dataclass
 class Exchange:
     person: str
     reply: str
     said_at: float
-    speaker: str = "Person"
+    speaker: str | None = None   # None: nobody named for it yet
+    # Said while a stranger was in front (ConversationWindow.someone_new):
+    # which one, so only that person's own name ever names it.
+    stranger: int | None = None
     # A turn whose answer came out of memory (the model called `remember` —
     # chat_turn says exactly when). It stays in the window for the
     # conversation to flow, but it never goes BACK into memory: measured
@@ -120,7 +128,7 @@ class Exchange:
         """How an exchange is stored and searched: both sides, one line — see
         EXCHANGE_KIND in emulator/memory.py for why. Named, once the person
         has said who they are."""
-        return f"{self.speaker}: {self.person} — Reachy: {self.reply}"
+        return f"{self.speaker or UNNAMED_LABEL}: {self.person} — Reachy: {self.reply}"
 
 
 class ConversationWindow:
@@ -141,7 +149,9 @@ class ConversationWindow:
         self._max = max_exchanges
         self._clock = clock
         self._exchanges: list[Exchange] = []
-        self._speaker = "Person"
+        self._speaker: str | None = None
+        self._stranger: int | None = None   # the stranger in front, if any
+        self._strangers = 0
 
     @property
     def budget(self) -> int:
@@ -154,29 +164,56 @@ class ConversationWindow:
         return [(e.person, e.reply) for e in self._exchanges]
 
     @property
-    def speaker(self) -> str:
+    def speaker(self) -> str | None:
+        """Who the robot is talking to, or None while nobody is named."""
         return self._speaker
 
     def set_speaker(self, name: str) -> None:
-        """Name the person the robot is talking to — from a face it
-        recognised (demo/people.py), which beats guessing from the words."""
-        if not name or name == self._speaker:
+        """The person the robot is talking to, from a face it recognised
+        (demo/people.py), which beats guessing from the words.
+
+        What was said before anyone was recognised is theirs too: the person
+        was talking before the camera knew them. What a stranger said is not,
+        nor what another person was named for — called every turn, this used
+        to hand words still in the window to whoever stepped in next."""
+        if not name:
+            return
+        self._stranger = None
+        if name == self._speaker:
             return
         self._speaker = name
         for exchange in self._exchanges:
-            exchange.speaker = name
+            if exchange.speaker is None and exchange.stranger is None:
+                exchange.speaker = name
+
+    def someone_new(self) -> None:
+        """A face the robot has never met has just come into view
+        (demo/people.py's Seen.stranger_arrived): what is said from now on is
+        not the last person's, and stays unnamed until this person says who
+        they are (introduce)."""
+        self._strangers += 1
+        self._stranger = self._strangers
+        self._speaker = None
+
+    def introduce(self, name: str) -> None:
+        """The person said who they are — the answer to the robot's name
+        question, or "I'm Bob" in passing. Their own unnamed words take the
+        name: the current stranger's, and what was said before anyone could
+        be told apart; another stranger's, or anyone named, stay as they are."""
+        for exchange in self._exchanges:
+            if exchange.speaker is None and exchange.stranger in (None, self._stranger):
+                exchange.speaker = name
+        self._speaker = name
+        self._stranger = None
 
     def add(self, person: str, reply: str, *, derived: bool = False) -> None:
         name = speaker_name(person)
         if name and name != self._speaker:
-            self._speaker = name
             print(f"  speaker:  {name}")
-            # Relabel what is still in the window: those exchanges have not
-            # reached memory yet, and they are the same person.
-            for exchange in self._exchanges:
-                exchange.speaker = name
-        self._exchanges.append(Exchange(person, reply, self._clock(),
-                                        derived=derived, speaker=self._speaker))
+            self.introduce(name)
+        self._exchanges.append(Exchange(
+            person, reply, self._clock(), derived=derived, speaker=self._speaker,
+            stranger=self._stranger if self._speaker is None else None))
 
     def after_turn(self, token_count: int | None) -> list[str]:
         """Evict when the context is over budget (or the window over its cap).

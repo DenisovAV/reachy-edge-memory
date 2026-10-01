@@ -466,6 +466,74 @@ def test_the_name_replaces_Person_in_what_is_stored():
         "Sasha: Hello there. — Reachy: Hi!"]
 
 
+
+def test_a_face_names_what_nobody_was_named_for_yet():
+    # The person was talking before the camera knew them: the same person.
+    window = _window(_Memory())
+    window.add("Hello there.", "Hi!")
+    window.set_speaker("Sasha")
+    window.add("Tell me a joke.", "Why did the robot cross the road?")
+    assert [e.speaker for e in window._exchanges] == ["Sasha", "Sasha"]
+
+
+def test_a_new_face_does_not_take_the_last_persons_words():
+    # Alice talks, steps away, Bob steps in and is recognised: what Alice said
+    # is still in the window, and it must reach memory as hers.
+    memory = _Memory()
+    window = _window(memory, budget_tokens=10)
+    window.set_speaker("Alice")
+    window.add("My dog is called Rex.", "Lovely name!")
+    window.set_speaker("Bob")
+    window.add("What's the weather?", "I can't see outside.")
+    assert [e.speaker for e in window._exchanges] == ["Alice", "Bob"]
+    window.flush()
+    assert [text for text, _kind, _meta in memory.remembered] == [
+        "Alice: My dog is called Rex. — Reachy: Lovely name!",
+        "Bob: What's the weather? — Reachy: I can't see outside."]
+
+
+def test_someone_new_names_only_their_own_words_when_they_say_who_they_are():
+    # Alice was recognised; a stranger steps in and talks, then says "I'm Bob".
+    # His words become Bob's; Alice's stay hers.
+    window = _window(_Memory())
+    window.set_speaker("Alice")
+    window.add("My dog is called Rex.", "Lovely name!")
+    window.someone_new()
+    window.add("Hello there.", "Hi!")
+    window.add("I'm Bob, by the way.", "Nice to meet you, Bob!")
+    assert [e.speaker for e in window._exchanges] == ["Alice", "Bob", "Bob"]
+
+
+def test_a_known_face_does_not_take_a_strangers_words():
+    # The stranger leaves unnamed; Alice comes back and is recognised. What
+    # the stranger said is not hers.
+    window = _window(_Memory())
+    window.set_speaker("Alice")
+    window.add("My dog is called Rex.", "Lovely name!")
+    window.someone_new()
+    window.add("I like trains.", "Me too!")
+    window.set_speaker("Alice")
+    window.add("Where were we?", "Your dog, Rex.")
+    assert [e.text.split(":")[0] for e in window._exchanges] == ["Alice", "Person", "Alice"]
+
+
+def test_a_stranger_who_said_their_name_keeps_it_while_they_stay():
+    window = _window(_Memory())
+    window.someone_new()
+    window.add("Hi, I'm Bob.", "Nice to meet you, Bob!")
+    window.add("What can you do?", "I remember things.")
+    assert [e.speaker for e in window._exchanges] == ["Bob", "Bob"]
+
+
+def test_an_answered_name_question_names_only_that_strangers_words():
+    window = _window(_Memory())
+    window.someone_new()
+    window.add("I like trains.", "Me too!")            # the first stranger
+    window.someone_new()
+    window.add("Hello there.", "Hi!")                 # another one
+    window.introduce("Bob")
+    assert [e.speaker for e in window._exchanges] == [None, "Bob"]
+
 # --- two memories: `recall` answers with words, `recall_seen` with a frame ---
 
 def _frame(score, ts=0.0):

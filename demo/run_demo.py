@@ -491,6 +491,10 @@ def _handle_stream(detections, audio, endpoint, robot, display,
         display.on_face(seen.name, seen.box, seen.score)
         if seen.known and conversation is not None:
             conversation.set_speaker(seen.name)
+        elif seen.stranger_arrived and conversation is not None:
+            # Someone the robot has never met has just stepped in: what they
+            # say is not the previous person's. Named when they say who they are.
+            conversation.someone_new()
         spoken = dict(make_player=make_player, robot_guard=robot_guard,
                       audio_guard=audio_guard, robot_dispatcher=robot_dispatcher,
                       synthesizer=synthesizer)
@@ -500,7 +504,7 @@ def _handle_stream(detections, audio, endpoint, robot, display,
             print(f"  I heard: {heard!r} (as the answer to the name question)")
             name, line = people.answer_name(heard)
             if name and conversation is not None:
-                conversation.set_speaker(name)
+                conversation.introduce(name)
             _say(line, endpoint, robot, display, **spoken)
             _report_memory_size(display, frame_memory, speech_memory, knowledge)
             return
@@ -576,17 +580,22 @@ class FaceTracker:
         self._aimed_at: list[float] | None = None
         self._aimed_when = float("-inf")
         self._held = False
+        self._watching = False
 
-    def hold(self) -> None:
-        """Stop aiming at faces — the head was turned on purpose (Looker)."""
+    def hold(self, *, watching: bool = False) -> None:
+        """Stop aiming at faces. The head was turned on purpose (Looker): what
+        the camera sees now is not who the robot talks to, so nothing is
+        concluded from it — People.look_away/look_back keep that person. Or the
+        robot is paused facing the room (`watching`): the faces in view are
+        still the people in front of it, only the head keeps still."""
         self._held = True
+        self._watching = watching
 
     def release(self) -> None:
+        # No face is marked seen here: a face nobody saw, stamped on resume,
+        # once kept a person who had left "in view" for the next voice.
         self._held = False
         self._aimed_at = None  # aim again at once, wherever the face now is
-        if self._people is not None:
-            # The head looked away on purpose; the person did not leave.
-            self._people.face_seen()
 
     def __call__(self, _detections=None) -> None:
         faces = self._faces()
@@ -595,10 +604,10 @@ class FaceTracker:
             name = self._people.current.name if self._people is not None else None
             score = float(faces[0].get("score", 0.0)) if faces else 0.0
             self._display.on_face(name, box, score)
+        if box and self._people is not None and (not self._held or self._watching):
+            self._people.face_seen()
         if not box or self._held:
             return
-        if self._people is not None:
-            self._people.face_seen()
         target = _gaze_at(box)
         now = self._clock()
         if now - self._aimed_when < self._min_interval:
@@ -667,6 +676,8 @@ class Looker:
         if direction != "ahead":
             if self._tracker is not None:
                 self._tracker.hold()
+            if self._people is not None:
+                self._people.look_away()
             self.turned = True
             try:
                 self._robot.look(direction)
@@ -722,6 +733,10 @@ class Looker:
                 self._robot.look("ahead")
         except Exception as exc:  # noqa: BLE001
             print(f"  [look] head did not come back ({type(exc).__name__}: {exc})")
+        if self._people is not None:
+            # The robot looked away; the person did not leave (a long reply
+            # with the head turned is no empty view).
+            self._people.look_back()
         if self._tracker is not None:
             self._tracker.release()
 
@@ -1527,7 +1542,7 @@ def _wait_while_paused(display, poll: float = 0.3, sleep=time.sleep,
             print("  paused from the dashboard — not listening")
             paused = True
             if tracker is not None:
-                tracker.hold()
+                tracker.hold(watching=True)
         sleep(poll)
     if paused:
         print("  resumed")

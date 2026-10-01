@@ -186,6 +186,153 @@ def test_a_recognised_person_is_kept_through_a_bad_angle():
     assert people.observe(FRAME).name == "Sasha"
 
 
+def test_a_stranger_is_said_to_arrive_once_not_on_every_turn():
+    memory = _Memory(_Match(None, 0.05))
+    people, now = _clocked(memory)
+    assert people.observe(FRAME).stranger_arrived
+    now[0] = 1.0
+    assert not people.observe(FRAME).stranger_arrived, "still the same stranger"
+    memory._match = _Match("Sasha", 0.7)
+    now[0] = 2.0
+    assert not people.observe(FRAME).stranger_arrived
+    memory._match = _Match(None, 0.05)
+    now[0] = 3.0
+    assert people.observe(FRAME).stranger_arrived, "after Sasha, someone new again"
+    memory._match = _Match(None, 0.30)   # too close to call: someone unnamed too
+    people, now = _clocked(memory)
+    assert people.observe(FRAME).stranger_arrived
+    now[0] = 1.0
+    assert not people.observe(FRAME).stranger_arrived
+
+
+def test_after_an_empty_view_the_next_stranger_is_someone_new():
+    # Live, the detect loop calls face_seen several times a second: the gap
+    # a stranger leaves is seen there, not by observe. A second stranger after
+    # an empty room is a new arrival, and the first one's face is not theirs.
+    memory = _Memory(_Match(None, 0.05))
+    people, now = _clocked(memory)
+    assert people.observe(FRAME).stranger_arrived
+    now[0] = 20.0                       # the room was empty
+    people.face_seen()                  # the detect loop sees a face again
+    assert people.observe(FRAME).stranger_arrived
+    people.ask_name()
+    people.answer_name("Carol")
+    assert memory.enrolled == [("Carol", 1)], "only Carol's own shot"
+
+
+def test_after_an_empty_view_an_unrecognised_face_is_not_the_last_person():
+    # Sasha leaves; the room is empty; someone steps in whom the camera cannot
+    # place — too close to call, no usable face, or no picture at all. None of
+    # them is Sasha, and each is someone new to the conversation.
+    for unreadable in ("too close to call", "no embedding", "no picture"):
+        people, memory = _met_sasha_clocked()
+        people._clock = lambda: 30.0
+        people.face_seen()                       # the detect loop: a face again
+        if unreadable == "too close to call":
+            memory._match = _Match("Sasha", 0.30)
+            seen = people.observe(FRAME)
+        elif unreadable == "no embedding":
+            people._reader = _Reader(faces=[{"box": [0, 0, 1, 1], "embedding": None}])
+            seen = people.observe(FRAME)
+        else:
+            seen = people.observe(None)
+        assert seen.name is None, unreadable
+        assert seen.stranger_arrived, unreadable
+
+
+def test_a_name_question_asked_of_someone_who_left_is_dropped():
+    memory = _Memory(_Match(None, 0.05))
+    people, now = _clocked(memory)
+    people.observe(FRAME)
+    people.ask_name()
+    now[0] = 30.0
+    people.face_seen()
+    assert not people.awaiting_name
+
+
+def test_an_empty_view_is_noticed_on_a_turn_that_sees_no_face():
+    # Bob was asked his name and walked off; 15 s later someone says "I'm
+    # Carol" from outside the picture. No face came back to notice the empty
+    # view: Bob's question is gone all the same, and his face shots with it.
+    memory = _Memory(_Match(None, 0.05))
+    people, now = _clocked(memory)
+    people.observe(FRAME)
+    people.ask_name()
+    now[0] = 15.0
+    people._reader = _Reader(faces=[])
+    seen = people.observe(FRAME)
+    assert not people.awaiting_name
+    assert seen.name is None and seen.stranger_arrived
+    assert not people.observe(None).stranger_arrived, "noticed once"
+
+    # Then Dave steps into the picture: he is not the voice from outside it.
+    now[0] = 25.0
+    people._reader = _Reader()
+    people.face_seen()
+    assert people.observe(FRAME).stranger_arrived
+
+
+def test_a_look_away_is_not_an_empty_view():
+    # The robot turned its head for a long reply: the stranger it was asking
+    # did not leave, and their face shots and the question still stand.
+    memory = _Memory(_Match(None, 0.05))
+    people, now = _clocked(memory)
+    people.observe(FRAME)
+    people.ask_name()
+    now[0] = 1.0
+    people.look_away()
+    now[0] = 30.0
+    people.look_back()
+    people.face_seen()
+    assert people.awaiting_name
+    assert not people.observe(FRAME).stranger_arrived
+
+
+def test_a_person_who_left_before_the_head_turned_stays_gone():
+    # Sasha walked off; later the robot looked away and back. Coming back
+    # must not bring her into view again for the next face to inherit.
+    people, memory = _met_sasha_clocked()
+    people._clock = lambda: 20.0
+    people.look_away()
+    people._clock = lambda: 30.0
+    people.look_back()
+    people.face_seen()                         # someone steps in
+    memory._match = _Match(None, 0.30)
+    seen = people.observe(FRAME)
+    assert seen.name is None and seen.stranger_arrived
+
+
+def test_a_turn_with_no_picture_is_not_another_arrival():
+    people = People(_Memory(_Match(None, 0.05)), _Reader())
+    assert people.observe(FRAME).stranger_arrived
+    assert not people.observe(None).stranger_arrived
+    people._reader = _Reader(fails=True)
+    assert not people.observe(FRAME).stranger_arrived
+
+
+def test_a_stranger_in_front_is_not_given_the_last_name_on_a_later_frame():
+    # Sasha, then a clear stranger: a frame where the face cannot be matched,
+    # or one too close to call, must not bring Sasha's name back.
+    people, memory = _met_sasha_clocked()
+    memory._match = _Match(None, 0.05)
+    assert people.observe(FRAME).name is None
+    memory._match = _Match(None, 0.30)
+    assert people.observe(FRAME).name is None
+    people._reader = _Reader(faces=[{"box": [0, 0, 1, 1], "embedding": None}])
+    assert people.observe(FRAME).name is None
+
+
+def _met_sasha_clocked():
+    memory = _Memory(_Match(None, 0.05))
+    people, now = _clocked(memory)
+    people.observe(FRAME)
+    people.ask_name()
+    people.answer_name("Sasha")
+    now[0] = 3.0
+    people.face_seen()
+    return people, memory
+
+
 def test_learning_poses_is_capped():
     from demo.people import MAX_LEARNED_SHOTS
 
