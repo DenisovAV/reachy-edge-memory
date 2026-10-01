@@ -198,9 +198,9 @@ class MacPlatform:
         self._camera: CameraStream | None = None
         self._mic: MicStream | None = None
         # Cached like _camera/_mic above: make_player() (--speaker robot)
-        # needs the SAME HttpReachyRobot instance run_voice already holds,
-        # not a second one with its own independent failure-cooldown state
-        # (HttpReachyRobot's breaker) for the same physical robot.
+        # uses the SAME HttpReachyRobot instance run_voice already holds —
+        # one client for one physical robot, its motion and its sound each
+        # behind their own breaker (demo/robot_reachy.py).
         self._robot: object | None = None
 
     def video_source(self) -> VideoSource:

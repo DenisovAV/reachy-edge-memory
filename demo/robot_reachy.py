@@ -159,6 +159,14 @@ DEFAULT_TIMEOUT_S = 1.5
 CONSECUTIVE_FAILURES_BEFORE_COOLDOWN = 3
 FAILURE_COOLDOWN_S = 5.0
 
+
+class _Breaker:
+    """One run of failures and the cooldown it opened."""
+
+    def __init__(self) -> None:
+        self.failures = 0
+        self.until = 0.0  # time.monotonic() deadline; 0 == not tripped
+
 # Sound uploads on the daemon land at /tmp/reachy_mini_sounds/<filename> and
 # are simply OVERWRITTEN when the name repeats (measured by reading the
 # daemon's own routers/media.py on the robot,
@@ -220,7 +228,10 @@ class HttpReachyRobot:
     A run of CONSECUTIVE_FAILURES_BEFORE_COOLDOWN failures opens a
     FAILURE_COOLDOWN_S breaker (see module constants): calls made while it's
     open raise immediately without touching the network, so a dead robot
-    costs one timeout, not one timeout per event for the whole outage. The
+    costs one timeout, not one timeout per event for the whole outage. Motion
+    and sound have a breaker each: a busy daemon timing out three head turns
+    in a row used to open the one breaker the reply's upload shared, and the
+    reply was silenced — speech must never wait on motion. The
     caller (demo/run_demo.py's _FailureGuard) still only LOGS the unhealthy/
     recovered transition once — this class is what keeps the per-call cost
     down for the rest of that outage.
@@ -230,27 +241,29 @@ class HttpReachyRobot:
                  timeout: float = DEFAULT_TIMEOUT_S) -> None:
         self._base = f"http://{host}:{port}/api"
         self._timeout = timeout
-        self._consecutive_failures = 0
-        self._cooldown_until = 0.0  # time.monotonic() deadline; 0 == not tripped
+        self._motion = _Breaker()
+        self._sound = _Breaker()
 
-    def _call(self, build_request, timeout: float | None = None) -> dict:
-        """Run one urllib POST through the shared failure-cooldown breaker.
+    def _call(self, build_request, timeout: float | None = None,
+              breaker: _Breaker | None = None) -> dict:
+        """Run one urllib POST through a failure-cooldown breaker — the
+        motion one unless `breaker` says otherwise.
 
         `build_request` is a zero-arg callable returning a fresh
         `urllib.request.Request` — freshness matters because a Request's
         file-like `data` can only be sent once, and both JSON calls
-        (`_post`) and the multipart sound upload (`_upload_sound`) need to
-        share this exact breaker/cooldown bookkeeping rather than each
-        keeping its own, separately-drifting copy of it.
+        (`_post`) and the multipart sound upload (`_upload_sound`) share this
+        one bookkeeping, each against the breaker of its kind.
 
         `timeout` overrides the instance's short control-call budget for a
         call that legitimately takes longer — the sound upload (see
         UPLOAD_TIMEOUT_S).
         """
+        breaker = breaker or self._motion
         now = time.monotonic()
-        if now < self._cooldown_until:
+        if now < breaker.until:
             raise TimeoutError(
-                f"{self._base}: skipping call, {self._cooldown_until - now:.1f}s "
+                f"{self._base}: skipping call, {breaker.until - now:.1f}s "
                 "left in failure cooldown")
         try:
             with urllib.request.urlopen(
@@ -262,28 +275,29 @@ class HttpReachyRobot:
             # range, a move while another plays). The robot is there: this
             # must not trip the breaker, or a few refused head turns would
             # silence the reply that shares it.
-            self._consecutive_failures = 0
-            self._cooldown_until = 0.0
+            breaker.failures = 0
+            breaker.until = 0.0
             raise
         except OSError:
             # URLError (connection refused, DNS failure) and a socket
             # timeout: "the robot isn't answering right now", which is
             # exactly what should trip the breaker above.
-            self._consecutive_failures += 1
-            if self._consecutive_failures >= CONSECUTIVE_FAILURES_BEFORE_COOLDOWN:
-                self._cooldown_until = now + FAILURE_COOLDOWN_S
+            breaker.failures += 1
+            if breaker.failures >= CONSECUTIVE_FAILURES_BEFORE_COOLDOWN:
+                breaker.until = now + FAILURE_COOLDOWN_S
             raise
-        self._consecutive_failures = 0
-        self._cooldown_until = 0.0
+        breaker.failures = 0
+        breaker.until = 0.0
         return result
 
-    def _post(self, path: str, body: dict | None = None) -> dict:
+    def _post(self, path: str, body: dict | None = None,
+              breaker: _Breaker | None = None) -> dict:
         def build() -> urllib.request.Request:
             return urllib.request.Request(
                 self._base + path, data=json.dumps(body or {}).encode(),
                 headers={"Content-Type": "application/json"}, method="POST")
 
-        return self._call(build)
+        return self._call(build, breaker=breaker)
 
     # A reply's WAV is hundreds of kilobytes (24 kHz speech: ~240 KB for five
     # seconds), and a socket timeout bounds the WHOLE transfer, not the gaps
@@ -306,7 +320,7 @@ class HttpReachyRobot:
                 self._base + "/media/sounds/upload", data=payload,
                 headers={"Content-Type": content_type}, method="POST")
 
-        result = self._call(build, timeout=self.UPLOAD_TIMEOUT_S)
+        result = self._call(build, timeout=self.UPLOAD_TIMEOUT_S, breaker=self._sound)
         return result["path"]
 
     def play_sound_file(self, wav_bytes: bytes, duration_s: float) -> None:
@@ -319,7 +333,7 @@ class HttpReachyRobot:
         """
         path = self._upload_sound(wav_bytes)
         try:
-            self._post("/media/play_sound", {"file": path})
+            self._post("/media/play_sound", {"file": path}, breaker=self._sound)
         finally:
             # Wait even if the POST raised. The daemon starts playing the
             # moment it ACCEPTS the request and answers afterwards, so a lost
