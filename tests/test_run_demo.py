@@ -2010,9 +2010,57 @@ def test_coming_back_without_a_face_looks_ahead_and_only_after_a_look():
     assert robot.calls == [("look", "left"), ("look", "ahead")]
 
 
-def test_a_robot_that_cannot_turn_still_gives_the_camera_picture():
-    looker = _looker(_LookRobot(fail=True))
-    assert looker.look("left")
+def test_a_head_that_did_not_turn_stores_nothing_and_says_so():
+    # The picture would be what is in front, stored as what is on the left:
+    # "what was on your left?" answered from it later, wrongly.
+    from demo.conversation import LookFailed
+
+    memory = _LookMemory()
+    looker = _looker(_LookRobot(fail=True), memory=memory)
+    with pytest.raises(LookFailed, match="could not turn to your left"):
+        looker.look("left")
+    looker.caption("On my left I see a window.")
+    assert memory.stored == [] and memory.captions == []
+    assert looker.turned, "come_back still puts the head where it belongs"
+
+
+def test_a_head_that_cannot_turn_is_said_through_the_voice_loop(monkeypatch):
+    # The whole turn: the model asks to look left, the robot cannot turn, the
+    # model hears so, nothing is stored, the head comes back, and the face
+    # tracker is let go even though coming back failed too.
+    import numpy as np
+
+    from demo.run_demo import Looker
+
+    faces, moves = [[{"box": [0.4, 0.2, 0.6, 0.5], "score": 0.9}]], []
+    tracker = _tracker(faces, moves)
+    memory, seen = _LookMemory(), []
+    looker = Looker(_LookRobot(fail=True), _LookSource(np.zeros((4, 4, 3), np.uint8)),
+                    tracker, memory, settle_s=0.0, sleep=lambda s: None)
+    _turn(monkeypatch, "Look to your left.", _tool("camera", direction="left"),
+          _said("I can't turn my head right now."), seen=seen, looker=looker)
+    assert seen[1][1].image_jpeg is None
+    assert seen[1][1].tool_result["result"] == {"error": "your head could not turn to your left"}
+    assert memory.stored == [] and memory.captions == []
+    assert not looker.turned
+    tracker()
+    assert moves, "the tracker aims again"
+
+
+def test_a_failed_look_does_not_caption_an_earlier_frame():
+    # A look stored the left; its turn ended before a caption. The next turn's
+    # look fails: the reply about that must not become the left's caption.
+    from demo.conversation import LookFailed
+
+    memory = _LookMemory()
+    robot = _LookRobot()
+    looker = _looker(robot, memory=memory)
+    looker.look("left")
+    robot._fail = True
+    with pytest.raises(LookFailed):
+        looker.look("right")
+    looker.caption("I can't turn my head right now.")
+    assert memory.captions == []
 
 
 def test_the_tracker_tells_people_a_face_is_still_there_and_a_look_does_not_break_it():

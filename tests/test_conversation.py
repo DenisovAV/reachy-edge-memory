@@ -625,6 +625,23 @@ def test_a_camera_call_straight_ahead_looks_ahead(arguments):
     assert (brain.requests[1].image_jpeg, brain.requests[1].image_note) == (b"NOW", LOOK_NOTE)
 
 
+def test_a_head_that_could_not_turn_is_told_to_the_model():
+    from demo.conversation import LookFailed
+
+    def look(direction):
+        raise LookFailed("your head could not turn to your left")
+
+    display = _Display()
+    brain = _Brain({"tool_call": {"name": "camera", "arguments": {"direction": "left"}}},
+                   {"reply": "I can't turn my head right now.", "token_count": None})
+    _turn("Look to your left.", brain, display=display, look_fn=look)
+    second = brain.requests[1]
+    assert second.image_jpeg is None
+    assert second.tool_result["result"] == {"error": "your head could not turn to your left"}
+    assert not [event for event in display.events if event[0] == "look"], \
+        "no picture on the screen either"
+
+
 def test_without_a_head_to_turn_the_camera_still_answers():
     brain = _Brain({"tool_call": {"name": "camera", "arguments": {"direction": "left"}}},
                    {"reply": "A mug.", "token_count": None})

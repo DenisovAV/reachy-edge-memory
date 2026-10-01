@@ -235,6 +235,12 @@ class ConversationWindow:
         return stored
 
 
+class LookFailed(Exception):
+    """The `camera` tool could not look where it was asked: the head did not
+    turn (demo/run_demo.py's Looker). Said to the model as it is — the
+    picture it would get instead is what is in front, not what is there."""
+
+
 class MemoryUnavailable(Exception):
     """A memory search that failed — as opposed to one that found nothing.
     The model is told which: answering "nothing in your memory" when the
@@ -601,7 +607,8 @@ def chat_turn(heard: str, *, window: ConversationWindow, send, recall_fn,
     `recall_seen` (what was seen), knowledge_fn(query) -> facts answers
     `knowledge`, camera_jpeg() -> bytes | None is the `camera` tool's picture,
     and look_fn(direction) -> bytes | None the picture after the head turned
-    "left" or "right" for it (demo/run_demo.py's Looker). who_fn() -> dict
+    "left" or "right" for it (demo/run_demo.py's Looker), raising LookFailed
+    when the head did not turn. who_fn() -> dict
     answers `who`, and names_fn() -> the names of the people in front of the
     robot right now, so a picture comes with them. move_fn(how) moves the body
     for the `move` tool.
@@ -709,7 +716,11 @@ def _answer_tool(name, arguments, heard, history, recall_fn,
         if look_fn is not None:
             # Straight ahead goes through the looker too: that picture is kept
             # and described like the others, for "what did you see?" later.
-            jpeg = look_fn(direction if turned else "ahead")
+            try:
+                jpeg = look_fn(direction if turned else "ahead")
+            except LookFailed as exc:
+                return encode_chat_request(history, heard, tool_result={
+                    "name": name, "result": {"error": str(exc)}}), False
         else:
             jpeg = camera_jpeg()
         if jpeg is None:
