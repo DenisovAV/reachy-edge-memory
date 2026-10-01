@@ -636,3 +636,26 @@ def test_a_service_started_again_is_waited_for_again():
     processes["voice"] = _FakeProcess(_running(["Speech threshold\n"]))
     supervisor.add(Service("voice", ["y"], 8091, "Speech threshold"))
     assert supervisor.wait_ready(timeout=2.0) == []
+
+
+def test_the_exit_code_is_waited_for_not_read_too_early():
+    # The output closes a moment before the process can be reaped: read
+    # without waiting, a restart's 42 came back as "still running".
+    class Exiting:
+        stdout = iter(())
+
+        def __init__(self):
+            self.waited = []
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            self.waited.append(timeout)
+            return 42
+
+    process = Exiting()
+    supervisor, _sent, _out = _supervisor([], {"voice": process})
+    supervisor.add(Service("voice", ["y"], 8091, "Speech threshold"))
+    assert supervisor.returncode("voice") == 42
+    assert process.waited and process.waited[0] is not None, "waited, but not forever"

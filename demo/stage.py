@@ -220,8 +220,13 @@ class Supervisor:
         self._start(service)
 
     def returncode(self, name: str) -> int | None:
-        """How a service ended, once it has; None while it runs."""
-        return self._processes[name].poll()
+        """How a service ended. Asked once its output has closed — the
+        process may still be a moment from being reaped, so it is waited
+        for, briefly, rather than read as "still running"."""
+        try:
+            return self._processes[name].wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            return None
 
     def _start(self, service: Service) -> None:
         process = self._spawn(service)
@@ -641,7 +646,7 @@ def main(argv=None) -> int:
                 late = supervisor.wait_ready(VOICE_READY_TIMEOUT_S)
                 if late:
                     print(f"  did not come up: {', '.join(late)} — stopping the rest")
-                    break
+                    return 1
                 print("  started over — just talk", flush=True)
                 continue
             if dead:
