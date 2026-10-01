@@ -452,7 +452,7 @@ def lookup(query: str, *, knowledge=None, k: int = 3) -> list[dict]:
 
 
 # What `who` says when it cannot tell who is there: faces off (no face models,
-# --no-faces) or the faces of this frame could not be read. The answer also
+# --no-faces), no picture this turn, or the faces in it could not be read. The answer also
 # carries {FACES_OFF: True}, which is what the code reads — never the note.
 FACES_UNAVAILABLE_NOTE = "You cannot recognise faces right now."
 FACES_OFF = "faces_off"
@@ -473,11 +473,15 @@ def who(*, people=None, frame=None, frame_memory=None,
     if people is None or not people.enabled:
         return {FACES_OFF: True, "note": FACES_UNAVAILABLE_NOTE}
     now = clock()
-    try:
-        here, readable = people.faces_in(frame), True
-    except Exception as exc:  # noqa: BLE001 — who must not break the turn
-        print(f"  [who] faces could not be read ({type(exc).__name__}: {exc})")
-        here, readable = [], False
+    # No picture is not nobody there: told "nobody is in front of your
+    # camera", the `me` answer called a person the robot had met a stranger.
+    here, readable = [], frame is not None
+    if readable:
+        try:
+            here = people.faces_in(frame)
+        except Exception as exc:  # noqa: BLE001 — who must not break the turn
+            print(f"  [who] faces could not be read ({type(exc).__name__}: {exc})")
+            readable = False
     result: dict = {"in_front_of_you": [p["name"] for p in here if p.get("name")]}
     strangers = sum(1 for p in here if not p.get("name"))
     if strangers:

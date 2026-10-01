@@ -748,8 +748,18 @@ def test_who_names_who_is_here_who_was_seen_and_who_was_met():
 def test_who_with_nobody_there_or_no_face_models_says_so():
     from demo.conversation import who
 
-    assert who(people=_People())["note"] == "Nobody is in front of your camera right now."
+    assert who(people=_People(), frame=object())["note"] == \
+        "Nobody is in front of your camera right now."
     assert who() == {"faces_off": True, "note": "You cannot recognise faces right now."}
+
+
+def test_who_without_a_picture_cannot_tell_who_is_there():
+    # The camera gave no frame this turn: that is not an empty room.
+    from demo.conversation import who
+
+    result = who(people=_People(here=[{"name": "Sasha"}], met=["Sasha"]), frame=None)
+    assert result["faces_off"] is True
+    assert result["note"] == "You cannot recognise faces right now."
 
 
 def test_a_look_line_says_who_was_there():
@@ -958,7 +968,7 @@ def test_the_person_in_front_of_the_robot_is_not_a_memory_of_them():
         def people_seen(self, before=None):
             return [("Sasha", 990.0), ("Masha", 400.0)]
 
-    result = who(people=_People(), frame=None, frame_memory=_Frames(),
+    result = who(people=_People(), frame=object(), frame_memory=_Frames(),
                  clock=lambda: 1000.0)
     assert result["in_front_of_you"] == ["Sasha"]
     assert result["seen_earlier"] == ["Masha, 10 minutes ago"]
@@ -1111,9 +1121,10 @@ def test_a_robot_that_cannot_recognise_faces_does_not_call_anyone_a_stranger():
         brain = _Brain(_call("remember", "do you remember me?", about="me"),
                        {"reply": "I can't tell right now.", "token_count": 1})
         _turn("Do you remember me?", brain, who_fn=who_fn)
-        note = brain.requests[1].tool_result["result"]["note"]
-        assert "not met" not in note
-        assert "cannot recognise faces" in note
+        result = brain.requests[1].tool_result["result"]
+        assert "not met" not in result["note"]
+        assert "cannot recognise faces" in result["note"]
+        assert "faces_off" not in result, "the flag is for the code, not the model"
 
 
 def test_who_says_so_when_the_faces_cannot_be_read():
@@ -1127,6 +1138,16 @@ def test_who_says_so_when_the_faces_cannot_be_read():
     assert result["faces_off"] is True
     assert result["note"] == "You cannot recognise faces right now."
     assert result["people_you_have_met"] == ["Sasha"]
+
+    # Through the `me` answer, as the voice loop wires it: the model hears it
+    # cannot tell, and still who it has met.
+    brain = _Brain(_call("remember", "do you remember me?", about="me"),
+                   {"reply": "I can't tell right now.", "token_count": 1})
+    _turn("Do you remember me?", brain,
+          who_fn=lambda: who(people=_Unreadable(met=["Sasha"]), frame=object()))
+    answer = brain.requests[1].tool_result["result"]
+    assert "cannot recognise faces" in answer["note"]
+    assert answer["people_you_have_met"] == ["Sasha"]
 
 
 def test_a_question_that_names_something_is_still_a_search():

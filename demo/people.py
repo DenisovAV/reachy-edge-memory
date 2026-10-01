@@ -174,11 +174,14 @@ class People:
         name None for someone the robot has not met. Stored with a frame
         (emulator/frame_memory.py). Does not enrol or greet — that stays with
         observe(). A frame whose faces cannot be read is kept without names."""
+        if not self.enabled or frame is None:
+            return []
         try:
-            return self.faces_in(frame)
+            faces = self._reader.read(frame)
         except Exception as exc:  # noqa: BLE001 — a frame is kept without names
             print(f"  [faces] skip ({type(exc).__name__}: {exc})")
             return []
+        return self._named(faces)
 
     def faces_in(self, frame) -> list[dict]:
         """in_frame, raising when the faces cannot be read: the `who` answer
@@ -186,7 +189,9 @@ class People:
         tell who is there"."""
         if not self.enabled or frame is None:
             return []
-        faces = self._reader.read(frame)
+        return self._named(self._reader.read(frame))
+
+    def _named(self, faces) -> list[dict]:
         found = []
         for face in faces:
             if not face.get("embedding"):
