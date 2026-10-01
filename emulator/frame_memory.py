@@ -554,12 +554,16 @@ class SceneChangeWriter:
             # cycle past the interval. Marking it seen here lost every object
             # that arrived within ten seconds of the last stored frame.
             return False
-        self._last_labels = labels
+        # The attempt starts the interval, so a store that is down is tried
+        # once per interval rather than on every detect cycle...
         self._last_store = now
         meta = None
         if self._people is not None and PERSON_LABEL in labels:
             meta = {"people": self._people(frame_rgb)}
         self._memory.remember(frame_rgb, detections, meta)
+        # ...but the labels count as stored only once they are: one embed
+        # timeout used to lose the object for as long as it stayed in view.
+        self._last_labels = labels
         return True
 
 
