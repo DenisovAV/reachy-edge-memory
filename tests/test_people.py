@@ -214,6 +214,31 @@ def test_learning_poses_is_capped():
     assert learned == MAX_LEARNED_SHOTS
 
 
+
+def test_the_cap_on_learning_poses_is_per_person():
+    # A demo has visitors: the first one standing in bad light used up the
+    # whole run's cap, and nobody after them had a pose learned.
+    from demo.people import FACE_GONE_S, MAX_LEARNED_SHOTS
+
+    memory = _Memory(_Match(None, 0.05))
+    people, now = _clocked(memory)
+    for name, start in (("Sasha", 0.0), ("Robin", 1000.0)):
+        now[0] = start
+        memory._match = _Match(None, 0.05)   # someone new
+        people.observe(FRAME)
+        people.ask_name()
+        people.answer_name(name)
+        memory._match = _Match(None, 0.30)   # the same face, at a worse angle
+        for turn in range(MAX_LEARNED_SHOTS + 5):
+            now[0] = start + turn
+            people.observe(FRAME)
+        now[0] = start + MAX_LEARNED_SHOTS + 5 + FACE_GONE_S + 1   # gone
+    learned = {}
+    for name, count in memory.enrolled:
+        learned.setdefault(name, []).append(count)
+    assert sum(learned["Sasha"][1:]) == MAX_LEARNED_SHOTS
+    assert sum(learned["Robin"][1:]) == MAX_LEARNED_SHOTS
+
 # — who is in a frame —
 
 def test_in_frame_names_known_faces_and_leaves_strangers_unnamed():

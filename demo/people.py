@@ -39,7 +39,8 @@ ENROLL_SHOTS = 5
 FACE_GONE_S = 10.0
 
 # Shots added to that person while they stay in view and their face does not
-# match — the poses enrollment missed. Capped: this runs every turn.
+# match — the poses enrollment missed. Capped per person: this runs every turn,
+# and one visitor in bad light must not use up the next visitor's share.
 MAX_LEARNED_SHOTS = 10
 
 # What the robot says. Fixed lines, spoken through demo/serve.py's /say — the
@@ -116,7 +117,7 @@ class People:
         self._clock = clock
         self._here: str | None = None      # named, and still in view
         self._face_last_seen = float("-inf")
-        self._learned = 0
+        self._learned: dict[str, int] = {}   # poses learned, per person
 
     def face_seen(self) -> None:
         """A face is in the camera now — from the detect loop (demo/run_demo.py's
@@ -231,9 +232,11 @@ class People:
     def _still_the_same_person(self, face, score: float) -> Seen:
         """The face does not match, but it never left the camera: it is the
         person already named. Learn this pose, so it matches next time."""
-        if self._learned < MAX_LEARNED_SHOTS:
+        if self._learned.get(self._here, 0) < MAX_LEARNED_SHOTS:
             try:
-                self._learned += self._memory.enroll(self._here, [face["embedding"]])
+                self._learned[self._here] = (self._learned.get(self._here, 0)
+                                             + self._memory.enroll(self._here,
+                                                                   [face["embedding"]]))
             except Exception as exc:  # noqa: BLE001 — a turn must not hang on this
                 print(f"  [faces] could not learn a pose ({type(exc).__name__}: {exc})")
         self._shots.clear()
