@@ -491,6 +491,26 @@ def test_recall_keeps_memory_and_the_live_context_apart():
     assert found.in_context == [said]
 
 
+def test_a_memory_that_never_opened_is_not_an_empty_one():
+    # The memory shard could not open at start: told "Nothing in your memory
+    # about this" all run, the robot denied everything it was asked about.
+    from demo.conversation import MEMORY_OFF_NOTE
+
+    brain = _Brain(_call("remember", "my dog", about="said"),
+                   {"reply": "My memory is off right now.", "token_count": 1})
+    _turn("Do you remember my dog?", brain)
+    assert brain.requests[1].tool_result["result"] == {"note": MEMORY_OFF_NOTE}
+
+    # A memory that is there and has nothing still says so.
+    brain = _Brain(_call("remember", "my dog", about="said"),
+                   {"reply": "You never told me.", "token_count": 1})
+    _turn("Do you remember my dog?", brain,
+          recall_fn=lambda query: Recalled([], []),
+          recall_seen_fn=lambda query, direction=None, pictures=True: [])
+    assert brain.requests[1].tool_result["result"] == {
+        "note": "Nothing in your memory about this."}
+
+
 def test_a_memory_that_cannot_be_read_says_so_rather_than_finding_nothing():
     # "Nothing in your memory" for a store that could not be read had the
     # robot deny what it remembered.

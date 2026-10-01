@@ -602,10 +602,10 @@ def chat_turn(heard: str, *, window: ConversationWindow, send, recall_fn,
 
     send(payload) posts one request and plays what comes back (speech,
     motion), returning its done event — demo/run_demo.py wires it to
-    _http_stream + drive_robot_stream. recall_fn(query) -> Recalled answers
-    `recall` (what was said), recall_seen_fn(query) -> frames answers
-    `recall_seen` (what was seen), knowledge_fn(query) -> facts answers
-    `knowledge`, camera_jpeg() -> bytes | None is the `camera` tool's picture,
+    _http_stream + drive_robot_stream. recall_fn(query) -> Recalled searches
+    what was said, recall_seen_fn(query) -> frames what was seen — None for
+    a memory the robot does not have, which the model is told is off —
+    knowledge_fn(query) -> facts what it was taught, camera_jpeg() -> bytes | None is the `camera` tool's picture,
     and look_fn(direction) -> bytes | None the picture after the head turned
     "left" or "right" for it (demo/run_demo.py's Looker), raising LookFailed
     when the head did not turn. who_fn() -> dict
@@ -975,7 +975,12 @@ def _answer_tool(name, arguments, heard, history, recall_fn,
         return in_words(answer)
     if _ABOUT_THE_PAST.search(f"{heard} {query}".lower()):
         # A question about the past that nothing answers: "you never told
-        # me" is the answer, and it is a recall — not stored back.
+        # me" is the answer, and it is a recall — not stored back. Unless a
+        # memory is not there at all (no search for it was given): then
+        # nothing was found because nothing could be, and "nothing in your
+        # memory" had the robot deny everything for the whole run.
+        if recall_fn is None or recall_seen_fn is None:
+            return in_words({"note": MEMORY_OFF_NOTE}, from_memory=False)
         return in_words({"note": "Nothing in your memory about this."},
                         from_memory=False)
     # Not about the past at all — "tell me about black holes", "how do
@@ -1003,6 +1008,10 @@ SEEN, SAID, ME, TAUGHT, ANYTHING = "seen", "said", "me", "taught", "anything"
 # For a memory search that failed, not one that found nothing.
 MEMORY_UNAVAILABLE_NOTE = ("Your memory could not be searched just now. Say "
                            "so plainly — never that you do not remember.")
+# For a memory that is not there at all: it did not open at start, or the run
+# has none (--no-memory). Nothing in it is not the same as nothing found.
+MEMORY_OFF_NOTE = ("Your memory is off right now. Say so plainly — never that "
+                   "you do not remember.")
 # For a question that is not about the past and that memory has nothing on.
 GENERAL_QUESTION_NOTE = ("A general question, not a memory: answer it from your "
                          "own knowledge, in one or two sentences.")

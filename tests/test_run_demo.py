@@ -1330,6 +1330,16 @@ def test_an_empty_turn_stores_no_frame(monkeypatch):
     assert fm.calls == []
 
 
+def test_a_turn_without_its_memories_tells_the_model_they_are_off(monkeypatch):
+    from demo.conversation import MEMORY_OFF_NOTE
+
+    seen = []
+    _turn(monkeypatch, "Do you remember my dog?",
+          _tool("remember", query="my dog", about="said"), _said("It is off."),
+          seen=seen, frame_memory=None, speech_memory=None)
+    assert seen[1][1].tool_result["result"] == {"note": MEMORY_OFF_NOTE}
+
+
 def test_a_dropped_brain_does_not_break_the_turn(monkeypatch):
     from demo.run_demo import _handle_stream
 
