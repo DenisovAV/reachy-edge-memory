@@ -155,6 +155,11 @@ class People:
         match = self._memory.recognize(face["embedding"])
         if self._tracked_at_a_bad_angle(match):
             return self._still_the_same_person(face, match.score)
+        if not match.known:
+            # Not the tracked person at a bad angle, and nobody known: whoever
+            # this is, the person named before is not the one in front — and a
+            # later frame must not bring their name back to this face.
+            self._here = None
         if match.known:
             self._here = match.name
             self._shots.clear()
@@ -227,7 +232,7 @@ class People:
         robot has met — seen live: a second person in front of the robot was
         called Sasha, and their face was learned into Sasha's point."""
         return (not match.known and not match.is_new
-                and match.name in (None, self._here) and self._still_here())
+                and match.name == self._here and self._still_here())
 
     def _still_here(self) -> bool:
         return (self._here is not None

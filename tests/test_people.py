@@ -4,6 +4,7 @@ import pytest
 
 from demo.people import (ASK_NAME, GREET_KNOWN, GREET_NEW, NOT_CAUGHT, People,
                          Seen, name_from_answer)
+from emulator.face_memory import Match as _Match   # the real one
 
 
 class _Memory:
@@ -20,25 +21,6 @@ class _Memory:
         shots = list(embeddings)
         self.enrolled.append((name, len(shots)))
         return len(shots)
-
-
-class _Match:
-    """FaceMemory's Match, on its own lines (emulator/face_memory.py)."""
-
-    def __init__(self, name, score):
-        self.name, self.score = name, score
-
-    @property
-    def known(self):
-        from emulator.face_memory import MATCH_MIN_SCORE
-
-        return self.name is not None and self.score >= MATCH_MIN_SCORE
-
-    @property
-    def is_new(self):
-        from emulator.face_memory import NEW_PERSON_MAX_SCORE
-
-        return self.score < NEW_PERSON_MAX_SCORE
 
 
 class _Reader:
@@ -172,7 +154,7 @@ def test_someone_just_met_is_not_asked_again_while_they_stay_in_view():
     people.observe(FRAME)
     people.ask_name()
     people.answer_name("I'm Sasha.")
-    memory._match = _Match(None, 0.30)    # the same face, under the line
+    memory._match = _Match("Sasha", 0.30)    # the same face, under the line
     for t in (2.0, 4.0, 6.0):             # the detect loop keeps seeing a face
         now[0] = t
         people.face_seen()
@@ -199,7 +181,7 @@ def test_a_recognised_person_is_kept_through_a_bad_angle():
     memory = _Memory(_Match("Sasha", 0.7))
     people, now = _clocked(memory)
     assert people.observe(FRAME).name == "Sasha"
-    memory._match = _Match(None, 0.30)     # turned their head: close, under the line
+    memory._match = _Match("Sasha", 0.30)     # turned their head: close, under the line
     now[0] = 3.0
     assert people.observe(FRAME).name == "Sasha"
 
@@ -212,7 +194,7 @@ def test_learning_poses_is_capped():
     people.observe(FRAME)
     people.ask_name()
     people.answer_name("Sasha")
-    memory._match = _Match(None, 0.30)    # the same face, at a worse angle
+    memory._match = _Match("Sasha", 0.30)    # the same face, at a worse angle
     for turn in range(MAX_LEARNED_SHOTS + 5):
         now[0] = float(turn)
         people.observe(FRAME)
@@ -267,7 +249,7 @@ def test_in_frame_names_known_faces_and_leaves_strangers_unnamed():
 
     class _ByVector(_Memory):
         def recognize(self, embedding):
-            return _Match("Sasha", 0.7) if embedding == [0.1] else _Match(None, 0.1)
+            return _Match("Sasha", 0.7) if embedding == [0.1] else _Match("Sasha", 0.1)
 
         def people(self):
             return ["Sasha"]
@@ -318,6 +300,9 @@ def test_someone_else_the_robot_has_met_is_not_the_tracked_person_at_an_angle():
     assert [p["name"] for p in people.in_frame(FRAME)] == [None]
     assert people.observe(FRAME).name is None
     assert [name for name, _count in memory.enrolled] == ["Sasha"], "nothing learned"
+    # Nor does Sasha's name come back to that face a moment later.
+    memory._match = _Match("Sasha", 0.30)
+    assert people.observe(FRAME).name is None
 
 
 def test_in_frame_without_faces_or_models_is_empty():
@@ -341,6 +326,7 @@ def test_a_clear_stranger_is_never_given_the_name_of_the_person_in_view():
     people.observe(FRAME)
     people.ask_name()
     people.answer_name("Sasha")
+    memory._match = _Match("Sasha", 0.02)          # nearest is Sasha, far off
     enrolled_before = len(memory.enrolled)
     now[0] = 2.0
     people.face_seen()
@@ -350,11 +336,12 @@ def test_a_clear_stranger_is_never_given_the_name_of_the_person_in_view():
 
 
 def test_the_same_person_at_a_bad_angle_keeps_their_name():
-    memory = _Memory(_Match(None, 0.30))          # between the two thresholds
+    memory = _Memory(_Match(None, 0.05))
     people, now = _clocked(memory)
     people.observe(FRAME)
     people.ask_name()
     people.answer_name("Sasha")
+    memory._match = _Match("Sasha", 0.30)          # between the two thresholds
     now[0] = 2.0
     people.face_seen()
     assert people.observe(FRAME).name == "Sasha"
