@@ -120,6 +120,30 @@ def _writer(mem, clk, interval=2.0):
     return SceneChangeWriter(mem, min_interval=interval, clock=lambda: clk["t"])
 
 
+def test_a_new_object_whose_write_failed_is_stored_on_the_next_try():
+    # One embed timeout used to mark the object as stored: it never was, and
+    # nothing retried it while it stayed in view.
+    class FailsOnce(_RecordingMemory):
+        failed = False
+
+        def remember(self, frame, detections=None, meta=None):
+            if not self.failed:
+                self.failed = True
+                raise OSError("embed service timed out")
+            super().remember(frame, detections, meta)
+
+    mem, clk = FailsOnce(), {"t": 0.0}
+    w = _writer(mem, clk)
+    with pytest.raises(OSError):
+        w.observe(_frame(0), [{"label": "cup"}])
+    clk["t"] = 0.5
+    assert w.observe(_frame(1), [{"label": "cup"}]) is False, \
+        "retried after the interval, not on every detect cycle"
+    clk["t"] = 2.5
+    assert w.observe(_frame(2), [{"label": "cup"}]) is True
+    assert len(mem.stored) == 1
+
+
 def test_scene_writer_stores_when_a_new_label_appears():
     mem, clk = _RecordingMemory(), {"t": 0.0}
     w = _writer(mem, clk)
