@@ -8,7 +8,7 @@ the module docstrings of emulator/frame_memory.py and emulator/memory.py):
 `embed()`/`query_embed()` shape TextMemory uses. Both send bytes over HTTP and
 get a vector back — constructing either loads nothing, which is the whole
 point: a memory built on the robot must be constructible without the models
-it used to compute its own vectors with (see tests/test_remote_embedder.py's
+it used to compute its own vectors with (see tests/test_embed_client.py's
 import-isolation test).
 
 Deliberately NOT resilient the way demo/detect_source.py's GpuDetectSource or

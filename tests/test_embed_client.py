@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from demo.embed_service import IMAGE_PATH, SPEECH_PATH, TEXT_PATH
-from emulator.remote_embedder import (
+from demo.embed_client import (
     RemoteBgeEmbedder,
     RemoteSiglipEmbedder,
     embed_service_url,
@@ -159,7 +159,7 @@ def test_bge_embedder_failure_raises(monkeypatch):
 def test_default_timeout_is_short(monkeypatch):
     # Matches GpuDetectSource's own budget for the same shape of call (JPEG
     # upload + inference + small JSON reply) — see the module's own comment.
-    from emulator.remote_embedder import DEFAULT_TIMEOUT_S
+    from demo.embed_client import DEFAULT_TIMEOUT_S
 
     assert DEFAULT_TIMEOUT_S <= 5.0
 
@@ -174,7 +174,7 @@ def test_default_timeout_is_short(monkeypatch):
 def test_siglip_embedder_trips_cooldown_after_consecutive_failures(monkeypatch):
     # After N failures in a row, further calls must not touch the network at
     # all — they should raise immediately instead of paying another timeout.
-    from emulator.remote_embedder import CONSECUTIVE_FAILURES_BEFORE_COOLDOWN
+    from demo.embed_client import CONSECUTIVE_FAILURES_BEFORE_COOLDOWN
 
     calls = {"n": 0}
 
@@ -196,7 +196,7 @@ def test_siglip_embedder_trips_cooldown_after_consecutive_failures(monkeypatch):
 
 
 def test_siglip_embedder_cooldown_recovers_automatically(monkeypatch):
-    from emulator.remote_embedder import (
+    from demo.embed_client import (
         CONSECUTIVE_FAILURES_BEFORE_COOLDOWN, FAILURE_COOLDOWN_S)
 
     clock = {"t": 0.0}
@@ -222,7 +222,7 @@ def test_siglip_embedder_cooldown_recovers_automatically(monkeypatch):
 
 
 def test_bge_embedder_trips_cooldown_after_consecutive_failures(monkeypatch):
-    from emulator.remote_embedder import CONSECUTIVE_FAILURES_BEFORE_COOLDOWN
+    from demo.embed_client import CONSECUTIVE_FAILURES_BEFORE_COOLDOWN
 
     calls = {"n": 0}
 
@@ -247,7 +247,7 @@ def test_siglip_and_bge_embedders_have_independent_cooldowns(monkeypatch):
     # Each embedder is a separate peer connection in demo/run_demo.py's
     # build_memories (one per memory) — one tripping its breaker must not
     # affect the other's.
-    from emulator.remote_embedder import CONSECUTIVE_FAILURES_BEFORE_COOLDOWN
+    from demo.embed_client import CONSECUTIVE_FAILURES_BEFORE_COOLDOWN
 
     def failing_urlopen(request, timeout=None):
         raise OSError("connection refused")

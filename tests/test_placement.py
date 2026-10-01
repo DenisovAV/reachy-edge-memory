@@ -191,7 +191,7 @@ def test_a_local_detector_with_the_faces_on_the_laptop_still_follows_faces(monke
             assert embed is False, "the head needs boxes, not identities"
             return [{"box": [0.1, 0.1, 0.3, 0.3], "score": 0.9, "embedding": None}]
 
-    monkeypatch.setattr("emulator.remote_embedder.RemoteFaceReader", Remote)
+    monkeypatch.setattr("demo.embed_client.RemoteFaceReader", Remote)
     source = run_demo.build_detect_source(args(on_robot="asr,detector", brain="mac"),
                                           camera=None, detect_url="http://mac/detect")
     assert source._faces("frame") == [{"box": [0.1, 0.1, 0.3, 0.3], "score": 0.9}]

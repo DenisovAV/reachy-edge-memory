@@ -279,7 +279,7 @@ class AsyncSceneWriter:
             self._wake.clear()
 
     def close(self, timeout: float = 6.0) -> None:
-        # Longer than emulator/remote_embedder.py's DEFAULT_TIMEOUT_S (5.0)
+        # Longer than demo/embed_client.py's DEFAULT_TIMEOUT_S (5.0)
         # for the same reason as GpuDetectSource.stop(): an in-flight
         # remember() should get the chance to actually finish (or time out on
         # its own) rather than being cut off mid-call by a shorter join.
@@ -938,7 +938,7 @@ def build_detect_source(args, camera, detect_url: str):
                 return [{"box": face.box, "score": face.score}
                         for face in reader.read(frame, embed=False)]
         else:
-            from emulator.remote_embedder import RemoteFaceReader
+            from demo.embed_client import RemoteFaceReader
 
             remote = RemoteFaceReader(_brain(args), _embed_port(args))
 
@@ -988,7 +988,7 @@ def build_memories(args):
         text_embedder = image_embedder = None
         where = "this robot"
     else:
-        from emulator.remote_embedder import RemoteBgeEmbedder, RemoteSiglipEmbedder
+        from demo.embed_client import RemoteBgeEmbedder, RemoteSiglipEmbedder
 
         text_embedder = RemoteBgeEmbedder(_brain(args), _embed_port(args))
         image_embedder = RemoteSiglipEmbedder(_brain(args), _embed_port(args))
@@ -1101,7 +1101,7 @@ def build_knowledge(args):
 
             embedder = _embedder(DEFAULT_MODEL)
         else:
-            from emulator.remote_embedder import RemoteBgeEmbedder
+            from demo.embed_client import RemoteBgeEmbedder
 
             embedder = RemoteBgeEmbedder(_brain(args), _embed_port(args))
         base = kb.open_knowledge(snapshot, _Path(target), embedder)
@@ -1151,7 +1151,7 @@ def build_people(args):
 
             reader = _FaceReaderAsDicts(FaceReader())
         else:
-            from emulator.remote_embedder import RemoteFaceReader
+            from demo.embed_client import RemoteFaceReader
 
             reader = RemoteFaceReader(_brain(args), _embed_port(args))
     except Exception as exc:  # noqa: BLE001 — faces are optional on the laptop

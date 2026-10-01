@@ -54,7 +54,7 @@ def _embedder(model_name: str) -> "TextEmbedding":
 class TextEmbedder(Protocol):
     """What TextMemory needs from an embedder: fastembed's embed/query_embed
     split — bge trains its query and document sides differently.
-    emulator/remote_embedder.py's RemoteBgeEmbedder has the same shape over
+    demo/embed_client.py's RemoteBgeEmbedder has the same shape over
     HTTP, for a robot that does not load the model itself."""
 
     def embed(self, texts: list[str]) -> "Iterable[np.ndarray]":
