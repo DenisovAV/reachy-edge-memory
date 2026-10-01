@@ -2063,6 +2063,33 @@ def test_a_failed_look_does_not_caption_an_earlier_frame():
     assert memory.captions == []
 
 
+def test_a_turn_that_failed_after_a_look_leaves_the_picture_without_a_caption(monkeypatch):
+    # Turn N looks left and stores the frame, then the reply fails. Turn N+1
+    # looks nowhere — its reply used to become the caption of turn N's frame.
+    from demo.run_demo import _handle_stream
+
+    memory = _LookMemory()
+    looker = _looker(memory=memory)
+    replies = iter([_tool("camera", direction="left")])
+
+    def fails_after_the_look(endpoint, payload):
+        try:
+            return iter(next(replies))
+        except StopIteration:
+            raise OSError("the laptop dropped") from None
+
+    monkeypatch.setattr("demo.run_demo._http_post", _fake_transcribe("Look to your left."))
+    monkeypatch.setattr("demo.run_demo._http_stream", fails_after_the_look)
+    monkeypatch.setattr("demo.audio_out.StreamPlayer", FakePlayer)
+    _handle_stream([], np.zeros(8000, np.float32), ENDPOINT, FakeRobot(),
+                   DisplaySpy(), looker=looker)
+    assert len(memory.stored) == 1
+
+    _turn(monkeypatch, "My favourite colour is blue.",
+          _said("Blue is my favourite colour."), looker=looker)
+    assert memory.captions == []
+
+
 def test_the_tracker_tells_people_a_face_is_still_there_and_a_look_does_not_break_it():
     class _People:
         def __init__(self):
