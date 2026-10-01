@@ -277,7 +277,7 @@ def memory_untouched(people):
     return people._memory.enrolled == [] and not people.awaiting_name
 
 
-def test_in_frame_keeps_the_tracked_person_named_at_a_bad_angle():
+def _met_sasha():
     memory = _Memory(_Match(None, 0.05))
     people, now = _clocked(memory)
     people.observe(FRAME)
@@ -285,7 +285,21 @@ def test_in_frame_keeps_the_tracked_person_named_at_a_bad_angle():
     people.answer_name("Sasha")
     now[0] = 3.0
     people.face_seen()
+    return people, memory
+
+
+def test_in_frame_keeps_the_tracked_person_named_at_a_bad_angle():
+    people, memory = _met_sasha()
+    memory._match = _Match("Sasha", 0.30)   # under the line, not someone else
     assert [p["name"] for p in people.in_frame(FRAME)] == ["Sasha"]
+
+
+def test_in_frame_does_not_give_a_clear_stranger_the_last_persons_name():
+    # Sasha steps away, someone else steps in within the 10 s: observe()
+    # already refuses them Sasha's name; the frame stored with them must too.
+    people, memory = _met_sasha()
+    memory._match = _Match(None, 0.05)
+    assert [p["name"] for p in people.in_frame(FRAME)] == [None]
 
 
 def test_in_frame_without_faces_or_models_is_empty():
