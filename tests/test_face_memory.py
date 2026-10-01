@@ -196,3 +196,16 @@ def test_a_persons_shots_are_capped_keeping_the_enrolment():
 def _unit(seed: int) -> list[float]:
     vector = np.random.default_rng(seed).random(512).astype(np.float32)
     return (vector / np.linalg.norm(vector)).tolist()
+
+
+def test_a_face_is_never_enrolled_under_no_name():
+    # A nameless point would leave every face nearest it unnamed for good.
+    import pytest
+
+    from emulator.face_memory import FaceMemory
+
+    memory = FaceMemory(None, size=3)
+    for name in (None, ""):
+        with pytest.raises(ValueError):
+            memory.enroll(name, [[1.0, 0.0, 0.0]])
+    assert memory.people() == []
