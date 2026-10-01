@@ -788,6 +788,7 @@ def _talk(heard, detections, endpoint, robot, display, conversation, *,
             raise OSError("the reply ended before it finished")
         return done
 
+    done = None
     try:
         done = chat_turn(
             heard, window=conversation, send=send, display=display,
@@ -814,8 +815,10 @@ def _talk(heard, detections, endpoint, robot, display, conversation, *,
     finally:
         if looker is not None:
             looker.come_back(face_box)
-    if looker is not None:
-        looker.caption(done.get("reply"))
+            # Whatever this turn looked at gets this turn's reply, or nothing:
+            # a turn that failed after a look used to leave the frame waiting,
+            # and the NEXT turn's reply became its caption.
+            looker.caption(done.get("reply") if done else None)
     if done.get("first_sound_ms"):
         print(f"  first sound: {done['first_sound_ms']:.0f} ms")
 
