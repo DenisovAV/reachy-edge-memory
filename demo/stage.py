@@ -227,6 +227,10 @@ class Supervisor:
         self._exited = threading.Event()
         self._dead: list[str] = []
         self._added: set[str] = set()
+        # A service started again (add) and the output thread of its last
+        # run finishing: one at a time, or the old run's end would mark the
+        # new one dead.
+        self._lock = threading.Lock()
 
     def start(self) -> None:
         """Start every service at once — they spend their first seconds
@@ -238,14 +242,15 @@ class Supervisor:
         """Start one more, once the others are up (the voice loop, which
         needs the models answering), or start it again after it exited.
         Stopped before the others on the way out."""
-        self._services = [s for s in self._services if s.name != service.name]
-        self._services.append(service)
-        self._added.add(service.name)
-        if service.name in self._dead:
-            self._dead.remove(service.name)
-            if not self._dead:
-                self._exited.clear()
-        self._start(service)
+        with self._lock:
+            self._services = [s for s in self._services if s.name != service.name]
+            self._services.append(service)
+            self._added.add(service.name)
+            if service.name in self._dead:
+                self._dead.remove(service.name)
+                if not self._dead:
+                    self._exited.clear()
+            self._start(service)
 
     def returncode(self, name: str) -> int | None:
         """How a service ended. Asked once its output has closed — the
@@ -258,9 +263,10 @@ class Supervisor:
 
     def _start(self, service: Service) -> None:
         process = self._spawn(service)
+        ready = threading.Event()
         self._processes[service.name] = process
-        self._ready[service.name] = threading.Event()
-        threading.Thread(target=self._pump, args=(service, process),
+        self._ready[service.name] = ready
+        threading.Thread(target=self._pump, args=(service, process, ready),
                          daemon=True).start()
 
     def wait_ready(self, timeout: float = READY_TIMEOUT_S) -> list[str]:
@@ -319,17 +325,20 @@ class Supervisor:
 
     # — output —
 
-    def _pump(self, service: Service, process) -> None:
+    def _pump(self, service: Service, process, ready: threading.Event) -> None:
         for line in process.stdout:
             text = line.rstrip("\n")
             self._write(service.name, text)
             if service.ready in text:
-                self._ready[service.name].set()
+                ready.set()
         # stdout closed: the service is on its way out. Unblock wait_ready so
         # a service that died during startup is reported instead of waited on.
-        self._ready[service.name].set()
-        self._dead.append(service.name)
-        self._exited.set()
+        ready.set()
+        with self._lock:
+            if self._processes.get(service.name) is not process:
+                return  # an earlier run of a service started again since
+            self._dead.append(service.name)
+            self._exited.set()
 
     def _write(self, name: str, text: str) -> None:
         prefix = f"{name:>6} | "

@@ -6,6 +6,7 @@ import signal
 import pytest
 import socket
 import subprocess
+import threading
 import time
 
 from demo.stage import (Service, Supervisor, _robot, _stop_on_sigterm,
@@ -651,6 +652,15 @@ def test_restart_pressed_while_the_voice_loop_starts_is_still_a_restart(monkeypa
                       ("add", "voice"), ("stop",)]
 
 
+def test_a_memory_that_cannot_be_moved_aside_while_starting_stops_too(monkeypatch):
+    import demo.stage as stage
+
+    code, events = _sim(monkeypatch, ready=[[], ["voice"]],
+                        codes=[stage.RESTART_EXIT_CODE], wiped=False)
+    assert code == 1
+    assert events.count(("add", "voice")) == 1, "not started again on the old memory"
+
+
 def test_a_voice_loop_that_crashes_keeps_its_memory_and_fails_the_stage(monkeypatch, capsys):
     code, events = _sim(monkeypatch, ready=[[], []], exits=["voice"], codes=[1])
     assert code == 1
@@ -763,6 +773,31 @@ def test_a_service_started_again_is_waited_for_again():
     processes["voice"] = _FakeProcess(_running(["Speech threshold\n"]))
     supervisor.add(Service("voice", ["y"], 8091, "Speech threshold"))
     assert supervisor.wait_ready(timeout=2.0) == []
+    waiting = threading.Thread(target=supervisor.wait, kwargs={"poll": 0.05},
+                               daemon=True)
+    waiting.start()
+    waiting.join(0.3)
+    assert waiting.is_alive(), "the run that exited no longer counts: wait blocks"
+
+
+def test_the_last_run_ending_late_does_not_end_the_new_one():
+    # A loop slow to start that exits on Restart while it is waited for: its
+    # output may close after the new run was started.
+    closing = threading.Event()
+
+    def old_output():
+        yield "loading...\n"
+        closing.wait(5)
+
+    processes = {"voice": _FakeProcess(old_output())}
+    supervisor, _sent, _out = _supervisor([], processes)
+    supervisor.add(Service("voice", ["y"], 8091, "Speech threshold"))
+    processes["voice"] = _FakeProcess(_running(["Speech threshold\n"]))
+    supervisor.add(Service("voice", ["y"], 8091, "Speech threshold"))
+    closing.set()                            # the old run's output closes now
+    assert supervisor.wait_ready(timeout=2.0) == []
+    time.sleep(0.2)
+    assert supervisor.wait_ready(timeout=0.1) == [], "the new run is not dead"
 
 
 def test_the_exit_code_is_waited_for_not_read_too_early():
