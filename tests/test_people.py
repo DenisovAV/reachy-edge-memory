@@ -256,6 +256,14 @@ def test_in_frame_without_faces_or_models_is_empty():
     assert People(_Memory(), _Reader(fails=True)).in_frame(FRAME) == []
 
 
+def test_faces_in_says_when_the_faces_could_not_be_read():
+    # in_frame keeps a frame without names; the `who` answer has to tell
+    # "nobody is there" from "I cannot tell who is there".
+    with pytest.raises(OSError):
+        People(_Memory(), _Reader(fails=True)).faces_in(FRAME)
+    assert People().faces_in(FRAME) == []
+
+
 def test_a_clear_stranger_is_never_given_the_name_of_the_person_in_view():
     # Live: a second person in front of the robot was called Sasha,
     # and their face was learned into Sasha's point.

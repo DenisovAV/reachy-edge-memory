@@ -451,6 +451,13 @@ def lookup(query: str, *, knowledge=None, k: int = 3) -> list[dict]:
         raise MemoryUnavailable(f"knowledge: {type(exc).__name__}: {exc}") from exc
 
 
+# What `who` says when it cannot tell who is there: faces off (no face models,
+# --no-faces), no picture this turn, or the faces in it could not be read. The answer also
+# carries {FACES_OFF: True}, which is what the code reads — never the note.
+FACES_UNAVAILABLE_NOTE = "You cannot recognise faces right now."
+FACES_OFF = "faces_off"
+
+
 def who(*, people=None, frame=None, frame_memory=None,
         turn_started_at: float | None = None, clock=time.time) -> dict:
     """Who is in front of the robot now, by face (the faces shard), who it saw
@@ -464,14 +471,25 @@ def who(*, people=None, frame=None, frame_memory=None,
     model is told they are here by other means (the note on a camera
     picture, the greeting), and every frame carries its own names anyway."""
     if people is None or not people.enabled:
-        return {"note": "You cannot recognise faces right now."}
+        return {FACES_OFF: True, "note": FACES_UNAVAILABLE_NOTE}
     now = clock()
-    here = people.in_frame(frame)
+    # No picture is not nobody there: told "nobody is in front of your
+    # camera", the `me` answer called a person the robot had met a stranger.
+    here, readable = [], frame is not None
+    if readable:
+        try:
+            here = people.faces_in(frame)
+        except Exception as exc:  # noqa: BLE001 — who must not break the turn
+            print(f"  [who] faces could not be read ({type(exc).__name__}: {exc})")
+            readable = False
     result: dict = {"in_front_of_you": [p["name"] for p in here if p.get("name")]}
     strangers = sum(1 for p in here if not p.get("name"))
     if strangers:
         result["people_you_have_not_met_in_front_of_you"] = strangers
-    if not here:
+    if not readable:
+        result[FACES_OFF] = True
+        result["note"] = FACES_UNAVAILABLE_NOTE
+    elif not here:
         result["note"] = "Nobody is in front of your camera right now."
     if frame_memory is not None:
         try:
@@ -747,12 +765,18 @@ def _answer_tool(name, arguments, heard, history, recall_fn,
         # today" while the person stood there and their name was in 34 frames.
         # This is also the one place a sighting of the person in front is the
         # answer rather than noise.
-        me = who_fn() or {} if who_fn is not None else {}
+        me = (who_fn() or {} if who_fn is not None
+              else {FACES_OFF: True, "note": FACES_UNAVAILABLE_NOTE})
         answer = {key: me[key] for key in
                   ("in_front_of_you", "you_met", "you_last_saw_them",
                    "people_you_have_met", "people_you_have_not_met_in_front_of_you")
                   if me.get(key)}
-        if not answer.get("in_front_of_you"):
+        if me.get(FACES_OFF):
+            # Not a stranger: someone the robot cannot see the face of. Told
+            # "you have not met them", it said so to a person it had met.
+            answer["note"] = ("You cannot recognise faces right now, so you "
+                              "cannot tell whether you have met them. Say so.")
+        elif not answer.get("in_front_of_you"):
             answer["note"] = ("You have not met the person in front of you. "
                               "Say so, and ask their name.")
         display.on_speech_recall([{"text": person, "score": 1.0, "source": "faces"}
