@@ -167,6 +167,15 @@ class _Breaker:
         self.failures = 0
         self.until = 0.0  # time.monotonic() deadline; 0 == not tripped
 
+    def failed(self) -> None:
+        self.failures += 1
+        if self.failures >= CONSECUTIVE_FAILURES_BEFORE_COOLDOWN:
+            # From the failure, not from the call: a call that took its whole
+            # timeout (15 s for a reply's upload) used to set a cooldown that
+            # had already passed, so the breaker never opened at all.
+            self.until = time.monotonic() + FAILURE_COOLDOWN_S
+
+
 # Sound uploads on the daemon land at /tmp/reachy_mini_sounds/<filename> and
 # are simply OVERWRITTEN when the name repeats (measured by reading the
 # daemon's own routers/media.py on the robot,
@@ -278,13 +287,19 @@ class HttpReachyRobot:
             breaker.failures = 0
             breaker.until = 0.0
             raise
+        except urllib.error.URLError:
+            # The request could not even be made (connection refused, no
+            # route, DNS): the robot is not there, for motion and sound alike
+            # — one breaker opening for both is what keeps a gone robot from
+            # costing a reply its whole upload timeout, every turn.
+            self._motion.failed()
+            self._sound.failed()
+            raise
         except OSError:
-            # URLError (connection refused, DNS failure) and a socket
-            # timeout: "the robot isn't answering right now", which is
-            # exactly what should trip the breaker above.
-            breaker.failures += 1
-            if breaker.failures >= CONSECUTIVE_FAILURES_BEFORE_COOLDOWN:
-                breaker.until = now + FAILURE_COOLDOWN_S
+            # Connected, but no answer in time: the daemon is busy with this
+            # kind of call (a head move behind a recorded one). Only its own
+            # breaker — a slow head must never silence the reply.
+            breaker.failed()
             raise
         breaker.failures = 0
         breaker.until = 0.0

@@ -395,3 +395,85 @@ def test_head_movements_timing_out_do_not_silence_the_reply(monkeypatch):
             robot.look_at(0.0, 0.0)
     robot.play_sound_file(b"RIFF", 0.1)
     assert urls[-1].endswith("/media/play_sound")
+
+
+def _clocked_robot(monkeypatch, urlopen):
+    from demo.robot_reachy import HttpReachyRobot
+
+    clock = {"t": 100.0}
+    monkeypatch.setattr("demo.robot_reachy.time.monotonic", lambda: clock["t"])
+    monkeypatch.setattr("demo.robot_reachy.time.sleep", lambda s: None)
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    return HttpReachyRobot(host="10.0.0.9"), clock
+
+
+def test_the_speakers_cooldown_ends_and_it_counts_again_from_nothing(monkeypatch):
+    import socket
+
+    from demo.robot_reachy import CONSECUTIVE_FAILURES_BEFORE_COOLDOWN, FAILURE_COOLDOWN_S
+
+    up = {"ok": False}
+
+    def urlopen(req, timeout=None):
+        if not up["ok"]:
+            raise socket.timeout("timed out")
+        return _FakeResponse(b'{"path": "/tmp/reachy_mini_sounds/demo_reply.wav"}')
+
+    robot, clock = _clocked_robot(monkeypatch, urlopen)
+    for _ in range(CONSECUTIVE_FAILURES_BEFORE_COOLDOWN):
+        with pytest.raises(OSError):
+            robot._upload_sound(b"RIFF")
+    with pytest.raises(TimeoutError, match="cooldown"):
+        robot._upload_sound(b"RIFF")
+    clock["t"] += FAILURE_COOLDOWN_S + 0.1
+    up["ok"] = True
+    robot._upload_sound(b"RIFF")          # through, and the count starts over
+    up["ok"] = False
+    with pytest.raises(OSError) as exc:
+        robot._upload_sound(b"RIFF")
+    assert "cooldown" not in str(exc.value), "one failure after a success is no outage"
+
+
+def test_a_call_that_fails_after_its_whole_timeout_still_opens_the_breaker(monkeypatch):
+    # The cooldown counts from the failure: an upload that waited its 15 s
+    # timeout used to set a deadline already in the past.
+    import socket
+
+    from demo.robot_reachy import CONSECUTIVE_FAILURES_BEFORE_COOLDOWN
+
+    calls = []
+
+    def slow_then_fails(req, timeout=None):
+        calls.append(req.full_url)
+        clock["t"] += 15.0
+        raise socket.timeout("timed out")
+
+    robot, clock = _clocked_robot(monkeypatch, slow_then_fails)
+    for _ in range(CONSECUTIVE_FAILURES_BEFORE_COOLDOWN):
+        with pytest.raises(OSError):
+            robot._upload_sound(b"RIFF")
+    with pytest.raises(TimeoutError, match="cooldown"):
+        robot._upload_sound(b"RIFF")
+    assert len(calls) == CONSECUTIVE_FAILURES_BEFORE_COOLDOWN
+
+
+def test_a_robot_that_is_not_there_opens_both_breakers(monkeypatch):
+    # Connection refused on the head's calls: the robot is gone, so the
+    # reply's upload fails at once instead of waiting out its own timeout.
+    import urllib.error
+
+    from demo.robot_reachy import CONSECUTIVE_FAILURES_BEFORE_COOLDOWN
+
+    calls = []
+
+    def refused(req, timeout=None):
+        calls.append(req.full_url)
+        raise urllib.error.URLError(ConnectionRefusedError("refused"))
+
+    robot, _clock = _clocked_robot(monkeypatch, refused)
+    for _ in range(CONSECUTIVE_FAILURES_BEFORE_COOLDOWN):
+        with pytest.raises(OSError):
+            robot.look_at(0.0, 0.0)
+    with pytest.raises(TimeoutError, match="cooldown"):
+        robot._upload_sound(b"RIFF")
+    assert not any(url.endswith("/media/sounds/upload") for url in calls)
