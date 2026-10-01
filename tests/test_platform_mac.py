@@ -377,8 +377,8 @@ def test_make_player_switches_to_robot_speaker_when_selected(monkeypatch):
 
 def test_make_player_robot_speaker_reuses_platforms_cached_robot(monkeypatch):
     # make_player must talk to the SAME HttpReachyRobot run_voice already
-    # holds (platform.robot()), not a second instance with its own
-    # independent failure-cooldown breaker for the same physical robot.
+    # holds (platform.robot()): one client for one physical robot, so a
+    # robot that is not there is known to its motion and its sound at once.
     monkeypatch.setattr("demo.platform.robot_audio.RobotSpeakerPlayer",
                         FakeRobotSpeakerPlayer)
     platform = mac.MacPlatform(_args(speaker="robot", no_robot=False))
