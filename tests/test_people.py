@@ -23,16 +23,22 @@ class _Memory:
 
 
 class _Match:
+    """FaceMemory's Match, on its own lines (emulator/face_memory.py)."""
+
     def __init__(self, name, score):
         self.name, self.score = name, score
 
     @property
     def known(self):
-        return self.name is not None and self.score >= 0.35
+        from emulator.face_memory import MATCH_MIN_SCORE
+
+        return self.name is not None and self.score >= MATCH_MIN_SCORE
 
     @property
     def is_new(self):
-        return self.score < 0.25
+        from emulator.face_memory import NEW_PERSON_MAX_SCORE
+
+        return self.score < NEW_PERSON_MAX_SCORE
 
 
 class _Reader:
@@ -297,9 +303,21 @@ def test_in_frame_keeps_the_tracked_person_named_at_a_bad_angle():
 def test_in_frame_does_not_give_a_clear_stranger_the_last_persons_name():
     # Sasha steps away, someone else steps in within the 10 s: observe()
     # already refuses them Sasha's name; the frame stored with them must too.
+    # FaceMemory names the nearest person whatever the score — as here.
     people, memory = _met_sasha()
-    memory._match = _Match(None, 0.05)
+    memory._match = _Match("Sasha", 0.05)
     assert [p["name"] for p in people.in_frame(FRAME)] == [None]
+
+
+def test_someone_else_the_robot_has_met_is_not_the_tracked_person_at_an_angle():
+    # Bob, met before, steps in at a bad angle while Sasha was being tracked:
+    # nearest to Bob, under the line. Not Sasha — and his face is not learned
+    # into Sasha's point.
+    people, memory = _met_sasha()
+    memory._match = _Match("Bob", 0.30)
+    assert [p["name"] for p in people.in_frame(FRAME)] == [None]
+    assert people.observe(FRAME).name is None
+    assert [name for name, _count in memory.enrolled] == ["Sasha"], "nothing learned"
 
 
 def test_in_frame_without_faces_or_models_is_empty():

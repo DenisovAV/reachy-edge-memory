@@ -153,12 +153,7 @@ class People:
             return self.current
         self.face_seen()
         match = self._memory.recognize(face["embedding"])
-        if not match.known and not match.is_new and self._here is not None:
-            # Close but under the line, with the same person still in view:
-            # this is them at a bad angle. A face that is CLEARLY someone else
-            # (match.is_new) never gets their name — seen live: a second
-            # person in front of the robot was called Sasha, and their
-            # face was learned into Sasha's point.
+        if self._tracked_at_a_bad_angle(match):
             return self._still_the_same_person(face, match.score)
         if match.known:
             self._here = match.name
@@ -199,10 +194,7 @@ class People:
                 continue
             match = self._memory.recognize(face["embedding"])
             name = match.name if match.known else None
-            # The tracked person at a bad angle — never a face that is
-            # clearly someone else, the same rule as observe().
-            if (name is None and not found and not match.is_new
-                    and self._still_here()):
+            if name is None and not found and self._tracked_at_a_bad_angle(match):
                 name = self._here
             found.append({"name": name, "box": face.get("box"),
                           "score": round(float(match.score), 3)})
@@ -227,6 +219,15 @@ class People:
         """Release the faces shard — the last enrolment lands on disk here."""
         if self._memory is not None:
             self._memory.close()
+
+    def _tracked_at_a_bad_angle(self, match) -> bool:
+        """Under the match line, with the person last named still in view:
+        them, at an angle enrollment missed. Never a face that is clearly
+        someone else (match.is_new), nor one nearest to another person the
+        robot has met — seen live: a second person in front of the robot was
+        called Sasha, and their face was learned into Sasha's point."""
+        return (not match.known and not match.is_new
+                and match.name in (None, self._here) and self._still_here())
 
     def _still_here(self) -> bool:
         return (self._here is not None
