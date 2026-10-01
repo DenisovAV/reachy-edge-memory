@@ -305,6 +305,18 @@ def test_someone_else_the_robot_has_met_is_not_the_tracked_person_at_an_angle():
     assert people.observe(FRAME).name is None
 
 
+def test_a_frame_between_turns_ends_the_tracking_too():
+    # Bob is seen first in a stored frame (the scene writer, between turns):
+    # his next frame, nearest to Sasha, must not be named or learned as her.
+    people, memory = _met_sasha()
+    memory._match = _Match("Sasha", 0.05)            # Bob, clearly not Sasha
+    assert [p["name"] for p in people.in_frame(FRAME)] == [None]
+    memory._match = _Match("Sasha", 0.30)
+    assert [p["name"] for p in people.in_frame(FRAME)] == [None]
+    assert people.observe(FRAME).name is None
+    assert [name for name, _count in memory.enrolled] == ["Sasha"], "nothing learned"
+
+
 def test_in_frame_without_faces_or_models_is_empty():
     assert People().in_frame(FRAME) == []
     assert People(_Memory(), _Reader(fails=True)).in_frame(FRAME) == []

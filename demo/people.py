@@ -199,8 +199,14 @@ class People:
                 continue
             match = self._memory.recognize(face["embedding"])
             name = match.name if match.known else None
-            if name is None and not found and self._tracked_at_a_bad_angle(match):
-                name = self._here
+            if name is None and not found:
+                if self._tracked_at_a_bad_angle(match):
+                    name = self._here
+                else:
+                    # Between turns too (a stored frame, a look): the face in
+                    # front is not the tracked person, so a later frame must
+                    # not give them that name — the same rule as observe().
+                    self._here = None
             found.append({"name": name, "box": face.get("box"),
                           "score": round(float(match.score), 3)})
         return found
