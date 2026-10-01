@@ -659,7 +659,11 @@ class Looker:
 
     def look(self, direction: str) -> bytes | None:
         """"left" or "right" turns the head first; "ahead" just takes the
-        picture as it is now."""
+        picture as it is now. Raises LookFailed when the head did not turn."""
+        # Only this look's frame waits for a caption: one left over from an
+        # earlier look got the reply about this one — "I can't turn my head"
+        # became the caption of the left a turn before.
+        self._stored = None
         if direction != "ahead":
             if self._tracker is not None:
                 self._tracker.hold()

@@ -638,6 +638,8 @@ def test_a_head_that_could_not_turn_is_told_to_the_model():
     second = brain.requests[1]
     assert second.image_jpeg is None
     assert second.tool_result["result"] == {"error": "your head could not turn to your left"}
+    assert not [event for event in display.events if event[0] == "look"], \
+        "no picture on the screen either"
 
 
 def test_without_a_head_to_turn_the_camera_still_answers():

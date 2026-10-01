@@ -607,7 +607,8 @@ def chat_turn(heard: str, *, window: ConversationWindow, send, recall_fn,
     `recall_seen` (what was seen), knowledge_fn(query) -> facts answers
     `knowledge`, camera_jpeg() -> bytes | None is the `camera` tool's picture,
     and look_fn(direction) -> bytes | None the picture after the head turned
-    "left" or "right" for it (demo/run_demo.py's Looker). who_fn() -> dict
+    "left" or "right" for it (demo/run_demo.py's Looker), raising LookFailed
+    when the head did not turn. who_fn() -> dict
     answers `who`, and names_fn() -> the names of the people in front of the
     robot right now, so a picture comes with them. move_fn(how) moves the body
     for the `move` tool.
