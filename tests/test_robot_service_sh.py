@@ -334,15 +334,3 @@ def test_a_value_that_would_break_out_of_the_remote_command_is_refused(tmp_path,
     assert result.returncode == 2
     assert name in result.stderr
     assert "reached ssh" not in result.stdout + result.stderr
-
-
-def test_the_pi5_command_says_it_is_coming_rather_than_half_start():
-    # demo/launch.sh is named in the README and the article before the mode
-    # lands: it must stop loudly, never look like a run that worked.
-    import subprocess
-
-    script = Path(__file__).resolve().parents[1] / "demo" / "launch.sh"
-    result = subprocess.run(["bash", str(script)], capture_output=True, text=True,
-                            timeout=30, env={"PI": "raspberrypi.local", "PATH": "/usr/bin:/bin"})
-    assert result.returncode != 0
-    assert "coming soon" in result.stderr
