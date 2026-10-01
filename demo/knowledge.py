@@ -107,7 +107,7 @@ def restore(snapshot_path: str | os.PathLike, target_dir: str | os.PathLike) -> 
 
 class KnowledgeBase:
     """A restored knowledge shard, searched by meaning. `embedder` has the
-    fastembed shape TextMemory uses (emulator/remote_embedder.py's
+    fastembed shape TextMemory uses (demo/embed_client.py's
     RemoteBgeEmbedder on the robot)."""
 
     def __init__(self, path: str | os.PathLike, embedder, *,

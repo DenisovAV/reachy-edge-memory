@@ -1103,8 +1103,8 @@ def test_startup_display_message_remote_falls_back_to_brain_host():
 
 # --- build_memories: REMOTE embedders — the
 # robot's memories must never load SigLIP/fastembed locally; they call
-# demo/embed_service.py on --brain:--embed-port instead (emulator/
-# remote_embedder.py). Constructing a RemoteSiglipEmbedder/RemoteBgeEmbedder
+# demo/embed_service.py on --brain:--embed-port instead
+# (demo/embed_client.py). Constructing a RemoteSiglipEmbedder/RemoteBgeEmbedder
 # does no I/O (see that module's docstring), so this needs no network fake —
 # only what got PASSED to FrameMemory/TextMemory is under test here.
 
@@ -1112,7 +1112,7 @@ def test_build_memories_wires_remote_embedders_addressed_at_brain_and_embed_port
     from types import SimpleNamespace
 
     import demo.run_demo as run_demo_mod
-    from emulator.remote_embedder import RemoteBgeEmbedder, RemoteSiglipEmbedder
+    from demo.embed_client import RemoteBgeEmbedder, RemoteSiglipEmbedder
 
     seen = {}
 
