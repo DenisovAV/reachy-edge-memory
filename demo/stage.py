@@ -37,6 +37,7 @@ import os
 import signal
 import socket
 import subprocess
+import shutil
 import sys
 import threading
 import time
@@ -52,6 +53,14 @@ _COLOURS = {"embed": "\033[35m", "serve": "\033[36m", "detect": "\033[33m",
 # How long the voice loop may take to say it listens, once the models are up:
 # the camera warms up first (demo/run_demo.py's run_voice, up to ~6 s).
 VOICE_READY_TIMEOUT_S = 60.0
+# How long it gets to exit: it stops the camera and the scene writer (up to
+# ~6 s each) before it saves the rest of the conversation — 20 s, as
+# scripts/robot_service.sh gives it on the robot, so it is never killed
+# mid-save.
+VOICE_STOP_GRACE_S = 20.0
+# demo/run_demo.py's: the voice loop's exit when the dashboard's Restart was
+# pressed (a test keeps the two equal; scripts/voice_loop.sh has it too).
+RESTART_EXIT_CODE = 42
 _RESET = "\033[0m"
 
 
@@ -67,6 +76,8 @@ class Service:
     # (see each module's main()), and that is a more honest readiness signal
     # than an open port: serve.py binds BEFORE it warms the models up.
     ready: str
+    # Seconds between SIGTERM and SIGKILL on the way out.
+    stop_grace: float = STOP_GRACE_S
 
 
 def build_services(args) -> list[Service]:
@@ -101,6 +112,11 @@ def build_services(args) -> list[Service]:
     return [s for s in services if s.name not in skip]
 
 
+# Where the voice loop keeps its memory with --sim (its Qdrant Edge shards).
+SIM_MEMORY_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              "results", "memory")
+
+
 def voice_loop_service(args) -> Service:
     """The voice loop on this machine, for --sim: the laptop's camera,
     microphone and speaker, the models just started here, the emulator's
@@ -111,8 +127,23 @@ def voice_loop_service(args) -> Service:
                              "--embed-port", str(args.embed_port),
                              "--web-port", str(args.web_port),
                              "--robot-host", args.robot_host,
-                             "--video", args.video, "--audio", args.audio],
-                   args.web_port, "Speech threshold")
+                             "--video", args.video, "--audio", args.audio,
+                             "--memory-dir", SIM_MEMORY_DIR],
+                   args.web_port, "Speech threshold", stop_grace=VOICE_STOP_GRACE_S)
+
+
+def wipe_memory(memory_dir: str) -> None:
+    """The dashboard's Restart with --sim, as scripts/voice_loop.sh does it on
+    the robot: between two runs (the shards are closed by now), the memory is
+    moved aside, not deleted — and only the last one is kept, as -previous."""
+    memory_dir = memory_dir.rstrip(os.sep)
+    previous = memory_dir + "-previous"
+    if not os.path.isdir(memory_dir):
+        print(f"  memory: nothing at {memory_dir} to clear", flush=True)
+        return
+    shutil.rmtree(previous, ignore_errors=True)
+    os.rename(memory_dir, previous)
+    print(f"  memory: cleared — the old one is kept as {previous}", flush=True)
 
 
 def port_answers(port: int, host: str = "127.0.0.1",
@@ -177,10 +208,20 @@ class Supervisor:
 
     def add(self, service: Service) -> None:
         """Start one more, once the others are up (the voice loop, which
-        needs the models answering). Stopped before them on the way out."""
+        needs the models answering), or start it again after it exited.
+        Stopped before the others on the way out."""
+        self._services = [s for s in self._services if s.name != service.name]
         self._services.append(service)
         self._added.add(service.name)
+        if service.name in self._dead:
+            self._dead.remove(service.name)
+            if not self._dead:
+                self._exited.clear()
         self._start(service)
+
+    def returncode(self, name: str) -> int | None:
+        """How a service ended, once it has; None while it runs."""
+        return self._processes[name].poll()
 
     def _start(self, service: Service) -> None:
         process = self._spawn(service)
@@ -229,10 +270,11 @@ class Supervisor:
                 self._send_signal(process, signal.SIGTERM)
             except (ProcessLookupError, PermissionError) as exc:
                 self._write(name, f"could not stop: {type(exc).__name__}: {exc}")
-        deadline = time.monotonic() + STOP_GRACE_S
+        started = time.monotonic()
+        grace = {service.name: service.stop_grace for service in self._services}
         for name in names:
             process = self._processes[name]
-            left = max(0.0, deadline - time.monotonic())
+            left = max(0.0, started + grace.get(name, STOP_GRACE_S) - time.monotonic())
             try:
                 process.wait(timeout=left)
             except subprocess.TimeoutExpired:
@@ -588,9 +630,23 @@ def main(argv=None) -> int:
                   if any(service.name == "dash" for service in services) else None)
         print("  Ctrl-C stops everything.\n")
 
-        dead = supervisor.wait()
-        if dead:
-            print(f"\n  {dead} exited — stopping the rest")
+        while True:
+            dead = supervisor.wait()
+            if (args.sim and dead == "voice"
+                    and supervisor.returncode("voice") == RESTART_EXIT_CODE):
+                # Restart from the dashboard: on the robot scripts/voice_loop.sh
+                # does this; here it is the launcher's job.
+                wipe_memory(SIM_MEMORY_DIR)
+                supervisor.add(voice_loop_service(args))
+                late = supervisor.wait_ready(VOICE_READY_TIMEOUT_S)
+                if late:
+                    print(f"  did not come up: {', '.join(late)} — stopping the rest")
+                    break
+                print("  started over — just talk", flush=True)
+                continue
+            if dead:
+                print(f"\n  {dead} exited — stopping the rest")
+            break
     except KeyboardInterrupt:
         print("\n  stopping")
     finally:

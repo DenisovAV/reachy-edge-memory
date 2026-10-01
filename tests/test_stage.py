@@ -549,3 +549,90 @@ def test_the_shutdown_waits_for_a_press_it_is_still_serving():
     finally:
         gate.set()
         dash.close()
+
+
+# — Restart under --sim —
+
+def test_the_restart_code_is_the_voice_loops():
+    from demo import run_demo, stage
+
+    assert stage.RESTART_EXIT_CODE == run_demo.RESTART_EXIT_CODE
+
+
+def test_a_restart_moves_the_memory_aside_and_keeps_only_the_last(tmp_path):
+    from demo.stage import wipe_memory
+
+    memory = tmp_path / "memory"
+    (memory / "people").mkdir(parents=True)
+    (memory / "people" / "Sasha").write_text("first run")
+    wipe_memory(str(memory))
+    assert not memory.exists()
+    assert (tmp_path / "memory-previous" / "people" / "Sasha").read_text() == "first run"
+    (memory / "people").mkdir(parents=True)
+    (memory / "people" / "Robin").write_text("second run")
+    wipe_memory(str(memory))
+    assert not (tmp_path / "memory-previous" / "people" / "Sasha").exists()
+    assert (tmp_path / "memory-previous" / "people" / "Robin").exists()
+    wipe_memory(str(memory))                 # nothing there: says so, no error
+
+
+def test_the_dashboards_restart_starts_the_voice_loop_over_under_sim(monkeypatch):
+    # On the robot scripts/voice_loop.sh restarts the loop on exit 42; with
+    # --sim nothing else would, and Restart used to stop the whole demo.
+    import demo.stage as stage
+
+    events = []
+
+    class Loading:
+        def __init__(self, services):
+            self.added = 0
+
+        def start(self):
+            pass
+
+        def wait_ready(self, timeout=None):
+            return []
+
+        def add(self, service):
+            self.added += 1
+            events.append(("add", service.name))
+
+        def wait(self):
+            if self.added == 1:
+                return "voice"               # the Restart button
+            raise KeyboardInterrupt          # then Ctrl-C
+
+        def returncode(self, name):
+            return stage.RESTART_EXIT_CODE
+
+        def stop(self):
+            events.append(("stop",))
+
+    monkeypatch.setattr(stage, "Supervisor", Loading)
+    monkeypatch.setattr(stage, "port_answers", lambda port: False)
+    monkeypatch.setattr(stage, "_refresh_knowledge", lambda: None)
+    monkeypatch.setattr(stage, "_stop_on_sigterm", lambda: None)
+    monkeypatch.setattr(stage, "_finish_undisturbed", lambda: None)
+    monkeypatch.setattr(stage, "wipe_memory", lambda path: events.append(("wipe", path)))
+    assert stage.main(["--sim"]) == 0
+    assert events == [("add", "voice"), ("wipe", stage.SIM_MEMORY_DIR),
+                      ("add", "voice"), ("stop",)]
+
+
+def test_the_voice_loop_gets_the_time_it_needs_to_save_on_the_way_out(monkeypatch):
+    from demo.stage import VOICE_STOP_GRACE_S, voice_loop_service
+
+    assert voice_loop_service(_args("--sim")).stop_grace == VOICE_STOP_GRACE_S >= 20.0
+
+
+def test_a_service_started_again_is_waited_for_again():
+    services = [Service("embed", ["x"], 9900, "embed_service on")]
+    processes = {"embed": _FakeProcess(_running(["embed_service on\n"])),
+                 "voice": _FakeProcess(iter(["Speech threshold\n"]))}  # exits at once
+    supervisor, _sent, _out = _supervisor(services, processes)
+    supervisor.start()
+    supervisor.add(Service("voice", ["y"], 8091, "Speech threshold"))
+    assert supervisor.wait(poll=0.05) == "voice"
+    processes["voice"] = _FakeProcess(_running(["Speech threshold\n"]))
+    supervisor.add(Service("voice", ["y"], 8091, "Speech threshold"))
+    assert supervisor.wait_ready(timeout=2.0) == []
