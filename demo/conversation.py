@@ -452,8 +452,10 @@ def lookup(query: str, *, knowledge=None, k: int = 3) -> list[dict]:
 
 
 # What `who` says when it cannot tell who is there: faces off (no face models,
-# --no-faces) or the faces of this frame could not be read.
+# --no-faces) or the faces of this frame could not be read. The answer also
+# carries {FACES_OFF: True}, which is what the code reads — never the note.
 FACES_UNAVAILABLE_NOTE = "You cannot recognise faces right now."
+FACES_OFF = "faces_off"
 
 
 def who(*, people=None, frame=None, frame_memory=None,
@@ -469,19 +471,20 @@ def who(*, people=None, frame=None, frame_memory=None,
     model is told they are here by other means (the note on a camera
     picture, the greeting), and every frame carries its own names anyway."""
     if people is None or not people.enabled:
-        return {"note": FACES_UNAVAILABLE_NOTE}
+        return {FACES_OFF: True, "note": FACES_UNAVAILABLE_NOTE}
     now = clock()
     try:
-        here, note = people.faces_in(frame), None
+        here, readable = people.faces_in(frame), True
     except Exception as exc:  # noqa: BLE001 — who must not break the turn
         print(f"  [who] faces could not be read ({type(exc).__name__}: {exc})")
-        here, note = [], FACES_UNAVAILABLE_NOTE
+        here, readable = [], False
     result: dict = {"in_front_of_you": [p["name"] for p in here if p.get("name")]}
     strangers = sum(1 for p in here if not p.get("name"))
     if strangers:
         result["people_you_have_not_met_in_front_of_you"] = strangers
-    if note is not None:
-        result["note"] = note
+    if not readable:
+        result[FACES_OFF] = True
+        result["note"] = FACES_UNAVAILABLE_NOTE
     elif not here:
         result["note"] = "Nobody is in front of your camera right now."
     if frame_memory is not None:
@@ -759,12 +762,12 @@ def _answer_tool(name, arguments, heard, history, recall_fn,
         # This is also the one place a sighting of the person in front is the
         # answer rather than noise.
         me = (who_fn() or {} if who_fn is not None
-              else {"note": FACES_UNAVAILABLE_NOTE})
+              else {FACES_OFF: True, "note": FACES_UNAVAILABLE_NOTE})
         answer = {key: me[key] for key in
                   ("in_front_of_you", "you_met", "you_last_saw_them",
                    "people_you_have_met", "people_you_have_not_met_in_front_of_you")
                   if me.get(key)}
-        if me.get("note") == FACES_UNAVAILABLE_NOTE:
+        if me.get(FACES_OFF):
             # Not a stranger: someone the robot cannot see the face of. Told
             # "you have not met them", it said so to a person it had met.
             answer["note"] = ("You cannot recognise faces right now, so you "

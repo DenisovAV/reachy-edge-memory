@@ -749,7 +749,7 @@ def test_who_with_nobody_there_or_no_face_models_says_so():
     from demo.conversation import who
 
     assert who(people=_People())["note"] == "Nobody is in front of your camera right now."
-    assert who() == {"note": "You cannot recognise faces right now."}
+    assert who() == {"faces_off": True, "note": "You cannot recognise faces right now."}
 
 
 def test_a_look_line_says_who_was_there():
@@ -1106,7 +1106,8 @@ def test_a_stranger_asking_if_they_are_remembered_is_told_the_truth():
 def test_a_robot_that_cannot_recognise_faces_does_not_call_anyone_a_stranger():
     # Faces off, or the face read failed: "Do you remember me?" came back "I
     # don't think we've met" — to someone the robot had met.
-    for who_fn in (lambda: {"note": "You cannot recognise faces right now."}, None):
+    for who_fn in (lambda: {"faces_off": True,
+                            "note": "You cannot recognise faces right now."}, None):
         brain = _Brain(_call("remember", "do you remember me?", about="me"),
                        {"reply": "I can't tell right now.", "token_count": 1})
         _turn("Do you remember me?", brain, who_fn=who_fn)
@@ -1123,6 +1124,7 @@ def test_who_says_so_when_the_faces_cannot_be_read():
             raise OSError("embed service down")
 
     result = who(people=_Unreadable(met=["Sasha"]), frame=object())
+    assert result["faces_off"] is True
     assert result["note"] == "You cannot recognise faces right now."
     assert result["people_you_have_met"] == ["Sasha"]
 
