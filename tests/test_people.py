@@ -397,3 +397,21 @@ def test_the_pattern_reads_the_name_when_the_model_cannot_be_asked():
     people.ask_name()
     name, _line = people.answer_name("I'm Sasha.")
     assert name == "Sasha"
+
+
+def test_a_pose_is_learned_under_the_name_it_was_judged_by():
+    # The scene writer's thread can end the tracking right after observe()
+    # judged the face to be the tracked person: the pose goes to the person
+    # it was judged to be, never to a nameless point.
+    people, memory = _met_sasha()
+    memory._match = _Match("Sasha", 0.30)
+    judged = people._tracked_at_a_bad_angle
+
+    def judged_then_ended(match, here):
+        result = judged(match, here)
+        people._here = None                  # in_frame, on the other thread
+        return result
+
+    people._tracked_at_a_bad_angle = judged_then_ended
+    assert people.observe(FRAME).name == "Sasha"
+    assert [name for name, _count in memory.enrolled] == ["Sasha", "Sasha"]

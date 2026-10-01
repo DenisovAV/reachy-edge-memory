@@ -90,6 +90,10 @@ class FaceMemory:
         pose stops matching the moment someone turns their head."""
         from emulator.edge_store import FACE
 
+        if not name:
+            # A face kept under no name is a point nobody can be told apart
+            # from: every face nearest to it would go unnamed for good.
+            raise ValueError("a face is enrolled under a name")
         shots = [vector for vector in (_as_list(e) for e in embeddings) if vector]
         if not shots:
             return 0

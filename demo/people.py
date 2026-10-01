@@ -153,8 +153,12 @@ class People:
             return self.current
         self.face_seen()
         match = self._memory.recognize(face["embedding"])
-        if self._tracked_at_a_bad_angle(match):
-            return self._still_the_same_person(face, match.score)
+        # Read once: in_frame on the scene writer's thread may end the
+        # tracking meanwhile, and a pose learned under a name read twice
+        # could go to nobody's point.
+        here = self._here
+        if self._tracked_at_a_bad_angle(match, here):
+            return self._still_the_same_person(face, match.score, here)
         if not match.known:
             # Not the tracked person at a bad angle, and nobody known: whoever
             # this is, the person named before is not the one in front — and a
@@ -200,8 +204,8 @@ class People:
             match = self._memory.recognize(face["embedding"])
             name = match.name if match.known else None
             if name is None and not found:
-                if self._tracked_at_a_bad_angle(match):
-                    name = self._here
+                if self._tracked_at_a_bad_angle(match, self._here):
+                    name = match.name   # the tracked person: the name it matched
                 else:
                     # Between turns too (a stored frame, a look): the face in
                     # front is not the tracked person, so a later frame must
@@ -231,23 +235,23 @@ class People:
         if self._memory is not None:
             self._memory.close()
 
-    def _tracked_at_a_bad_angle(self, match) -> bool:
+    def _tracked_at_a_bad_angle(self, match, here: str | None) -> bool:
         """Under the match line, with the person last named still in view:
         them, at an angle enrollment missed. Never a face that is clearly
         someone else (match.is_new), nor one nearest to another person the
         robot has met — seen live: a second person in front of the robot was
         called Sasha, and their face was learned into Sasha's point."""
-        return (not match.known and not match.is_new
-                and match.name == self._here and self._still_here())
+        return (here is not None and not match.known and not match.is_new
+                and match.name == here
+                and self._clock() - self._face_last_seen <= FACE_GONE_S)
 
     def _still_here(self) -> bool:
         return (self._here is not None
                 and self._clock() - self._face_last_seen <= FACE_GONE_S)
 
-    def _still_the_same_person(self, face, score: float) -> Seen:
+    def _still_the_same_person(self, face, score: float, name: str) -> Seen:
         """The face does not match, but it never left the camera: it is the
         person already named. Learn this pose, so it matches next time."""
-        name = self._here
         learned = self._learned.get(name, 0)
         if learned < MAX_LEARNED_SHOTS:
             try:
