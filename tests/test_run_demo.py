@@ -2010,9 +2010,18 @@ def test_coming_back_without_a_face_looks_ahead_and_only_after_a_look():
     assert robot.calls == [("look", "left"), ("look", "ahead")]
 
 
-def test_a_robot_that_cannot_turn_still_gives_the_camera_picture():
-    looker = _looker(_LookRobot(fail=True))
-    assert looker.look("left")
+def test_a_head_that_did_not_turn_stores_nothing_and_says_so():
+    # The picture would be what is in front, stored as what is on the left:
+    # "what was on your left?" answered from it later, wrongly.
+    from demo.conversation import LookFailed
+
+    memory = _LookMemory()
+    looker = _looker(_LookRobot(fail=True), memory=memory)
+    with pytest.raises(LookFailed, match="could not turn to your left"):
+        looker.look("left")
+    looker.caption("On my left I see a window.")
+    assert memory.stored == [] and memory.captions == []
+    assert looker.turned, "come_back still puts the head where it belongs"
 
 
 def test_the_tracker_tells_people_a_face_is_still_there_and_a_look_does_not_break_it():

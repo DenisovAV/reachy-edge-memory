@@ -235,6 +235,12 @@ class ConversationWindow:
         return stored
 
 
+class LookFailed(Exception):
+    """The `camera` tool could not look where it was asked: the head did not
+    turn (demo/run_demo.py's Looker). Said to the model as it is — the
+    picture it would get instead is what is in front, not what is there."""
+
+
 class MemoryUnavailable(Exception):
     """A memory search that failed — as opposed to one that found nothing.
     The model is told which: answering "nothing in your memory" when the
@@ -709,7 +715,11 @@ def _answer_tool(name, arguments, heard, history, recall_fn,
         if look_fn is not None:
             # Straight ahead goes through the looker too: that picture is kept
             # and described like the others, for "what did you see?" later.
-            jpeg = look_fn(direction if turned else "ahead")
+            try:
+                jpeg = look_fn(direction if turned else "ahead")
+            except LookFailed as exc:
+                return encode_chat_request(history, heard, tool_result={
+                    "name": name, "result": {"error": str(exc)}}), False
         else:
             jpeg = camera_jpeg()
         if jpeg is None:

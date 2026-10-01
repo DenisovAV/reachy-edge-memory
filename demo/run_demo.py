@@ -39,9 +39,9 @@ import numpy as np
 
 from demo.contract import (CHAT_PATH, NAME_PATH, SAY_PATH, TRANSCRIBE_PATH,
                            decode_transcribe_response, encode_transcribe_request)
-from demo.conversation import (DEFAULT_CONTEXT_BUDGET, ConversationWindow,
-                               chat_turn, day_frames, lookup, recall,
-                               recall_seen, who)
+from demo.conversation import (DEFAULT_CONTEXT_BUDGET, TURNED,
+                               ConversationWindow, LookFailed, chat_turn,
+                               day_frames, lookup, recall, recall_seen, who)
 from demo.detect_source import (GpuDetectSource, LocalDetectSource,
                                 frame_to_jpeg)
 from demo.detections import gaze_from_dicts
@@ -666,8 +666,13 @@ class Looker:
             self.turned = True
             try:
                 self._robot.look(direction)
-            except Exception as exc:  # noqa: BLE001 — the camera still has a picture
+            except Exception as exc:  # noqa: BLE001 — said to the model instead
+                # No picture and nothing stored: the camera still sees what is
+                # in front, and stored as what is on the left it answered "what
+                # was on your left?" wrongly for the rest of the run.
                 print(f"  [look] head did not turn ({type(exc).__name__}: {exc})")
+                raise LookFailed("your head could not turn "
+                                 f"{TURNED.get(direction, direction)}") from exc
             self._sleep(self._settle_s)
         frame, detections = self._source.latest()
         if frame is None:
