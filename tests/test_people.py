@@ -223,23 +223,26 @@ def test_the_cap_on_learning_poses_is_per_person():
     memory = _Memory(_Match(None, 0.05))
     people, now = _clocked(memory)
 
-    def at_bad_angles(name, start):
+    def at_bad_angles(name, start, turns):
         memory._match = _Match(name, 0.30)   # the same face, at a worse angle
-        for turn in range(MAX_LEARNED_SHOTS + 5):
+        for turn in range(turns):
             now[0] = start + turn
             people.observe(FRAME)
 
-    for name, start in (("Sasha", 0.0), ("Robin", 1000.0)):   # far apart: a new person
-        now[0] = start
+    # Sasha's first visit learns only 3: under the cap, so her return must
+    # carry on from there — neither start over nor stop.
+    for name, start, turns in (("Sasha", 0.0, 3),
+                               ("Robin", 1000.0, MAX_LEARNED_SHOTS + 5)):
+        now[0] = start                       # far apart: a new person
         memory._match = _Match(None, 0.05)   # someone new
         people.observe(FRAME)
         people.ask_name()
         people.answer_name(name)
-        at_bad_angles(name, start)
+        at_bad_angles(name, start, turns)
     now[0] = 2000.0
     memory._match = _Match("Sasha", 0.7)     # Sasha comes back, recognised
     people.observe(FRAME)
-    at_bad_angles("Sasha", 2000.0)
+    at_bad_angles("Sasha", 2000.0, MAX_LEARNED_SHOTS + 5)
 
     learned = {}
     for name, count in memory.enrolled:

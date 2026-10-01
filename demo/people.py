@@ -240,7 +240,7 @@ class People:
             except Exception as exc:  # noqa: BLE001 — a turn must not hang on this
                 print(f"  [faces] could not learn a pose ({type(exc).__name__}: {exc})")
         self._shots.clear()
-        self.current = Seen(self._here, score, face["box"])
+        self.current = Seen(name, score, face["box"])
         return self.current
 
     def greeting(self) -> str | None:
