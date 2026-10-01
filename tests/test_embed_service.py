@@ -69,6 +69,8 @@ def test_main_no_warmup_skips_warm_but_still_binds(monkeypatch):
 
 def _no_face_models(monkeypatch):
     """HSFace missing; YuNet, from the Hub, there — boxes, no identities."""
+    from pathlib import Path
+
     from emulator import face
 
     loads = []
@@ -82,7 +84,7 @@ def _no_face_models(monkeypatch):
         if not identities:
             return Boxes()
         loads.append(True)
-        raise FileNotFoundError("hsface10k.tflite is missing")
+        raise FileNotFoundError(f"{Path.home()}/repo/assets/hsface10k.tflite is missing")
 
     monkeypatch.setattr(face, "FaceReader", missing)
     return loads
@@ -110,6 +112,7 @@ def test_faces_off_is_answered_503_with_why_and_said_in_health(monkeypatch, capl
     import urllib.error
     import urllib.request
     from http.server import ThreadingHTTPServer
+    from pathlib import Path
 
     from PIL import Image
 
@@ -136,11 +139,14 @@ def test_faces_off_is_answered_503_with_why_and_said_in_health(monkeypatch, capl
                 except urllib.error.HTTPError as exc:
                     assert exc.code == 503
                     assert "faces off" in exc.reason
+                    assert str(Path.home()) not in exc.reason, "no user name on the wire"
         said = [r for r in caplog.records if "faces off" in r.getMessage()]
         assert len(said) == 1, "said once, when they failed to load"
         assert [r for r in caplog.records if r.exc_info] == said, "no traceback per frame"
         with urllib.request.urlopen(base + HEALTH_PATH, timeout=5) as resp:
-            assert "hsface10k.tflite is missing" in json.loads(resp.read())["faces_off"]
+            off = json.loads(resp.read())["faces_off"]
+            assert "~/repo/assets/hsface10k.tflite is missing" in off
+            assert str(Path.home()) not in off
         # The robot's own detect loop asks for boxes only: those it still gets.
         boxes = urllib.request.Request(
             base + FACE_PATH, method="POST",

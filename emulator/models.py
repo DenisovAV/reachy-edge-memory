@@ -87,6 +87,15 @@ def get(name: str) -> Model:
             f"unknown model {name!r}; known: {sorted(MODELS)}") from None
 
 
+def _shown(path: Path) -> str:
+    """A model's path as a message says it: from the repository root when it
+    is in it — shorter, and the same on every machine."""
+    try:
+        return str(path.relative_to(REPO))
+    except ValueError:
+        return str(path)
+
+
 def fetch(model: str | Model, *, build: bool = False) -> Path:
     """The local path to a model — a file, or a directory for a `patterns`
     model — downloading it on first use.
@@ -108,15 +117,15 @@ def fetch(model: str | Model, *, build: bool = False) -> Path:
                 code = _build(spec.build)
             except OSError as exc:  # no `uv` on this machine
                 raise FileNotFoundError(
-                    f"{spec.path} could not be built ({exc}) — "
+                    f"{_shown(spec.path)} could not be built ({exc}) — "
                     f"{spec.how_to_get or 'see README.md'}") from exc
             if code:
                 raise FileNotFoundError(
-                    f"{spec.path} could not be built (exit {code}, its output "
+                    f"{_shown(spec.path)} could not be built (exit {code}, its output "
                     f"is above) — {spec.how_to_get or 'see README.md'}")
         if not spec.path.exists():
             raise FileNotFoundError(
-                f"{spec.path} is missing — {spec.how_to_get or 'see README.md'}")
+                f"{_shown(spec.path)} is missing — {spec.how_to_get or 'see README.md'}")
         return spec.path
     from huggingface_hub import hf_hub_download, snapshot_download
 

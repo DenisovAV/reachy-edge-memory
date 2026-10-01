@@ -9,6 +9,17 @@ the handler. `ascii_reason` is the one place that guards it.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+
+def public(text: str) -> str:
+    """An error text fit to answer over the network with: this machine's home
+    directory as ~. An exception about a file names its path, and the path
+    names the user — to anyone on the network, since none of these services
+    has authentication (README, Security). The full text stays in the log."""
+    home = str(Path.home())
+    return text.replace(home, "~") if home not in ("", "/") else text
+
 
 def ascii_reason(text: str, limit: int = 200) -> str:
     """A send_error reason phrase safe for http.server's latin-1 encoder.
@@ -21,5 +32,5 @@ def ascii_reason(text: str, limit: int = 200) -> str:
     user input, but this is the shared helper for three servers — mapping every
     control char to a space closes the gap permanently.
     """
-    ascii_text = text[:limit].encode("ascii", "replace").decode("ascii")
+    ascii_text = public(text)[:limit].encode("ascii", "replace").decode("ascii")
     return "".join(c if 0x20 <= ord(c) < 0x7f else " " for c in ascii_text)

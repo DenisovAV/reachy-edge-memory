@@ -882,6 +882,9 @@ def test_the_face_model_is_built_only_for_whoever_uses_it(monkeypatch):
     on_robot = _args("--skip", "embed")
     assert _ensure_face_model(on_robot, build_services(on_robot)) is True
     assert asked == [("hsface", True)], "the robot does"
+    sim = _args("--sim", "--skip", "embed")
+    assert _ensure_face_model(sim, build_services(sim)) is True
+    assert asked == [("hsface", True)], "--sim deploys nothing to the robot"
 
 
 def test_the_face_model_is_ready_before_any_service_starts(monkeypatch):

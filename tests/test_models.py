@@ -185,6 +185,14 @@ def test_a_named_model_that_cannot_be_had_fails_the_command(monkeypatch, capsys)
     assert "MISSING" in capsys.readouterr().out
 
 
+def test_a_missing_model_in_the_repository_is_named_from_its_root():
+    spec = models.Model(path=models.ASSETS / "not-there.tflite")
+    with pytest.raises(FileNotFoundError) as exc:
+        models.fetch(spec)
+    assert "assets/not-there.tflite is missing" in str(exc.value)
+    assert str(models.REPO) not in str(exc.value)
+
+
 def test_the_face_embedder_is_built_not_asked_for():
     spec = models.get("hsface")
     assert spec.build and "scripts/convert_hsface.py" in spec.build

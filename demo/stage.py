@@ -553,10 +553,12 @@ def _ensure_face_model(args, services: list[Service]) -> bool:
     services, so the first face is not a request that waits two minutes —
     and only when something will use it: the laptop's embed service, or the
     robot when ON_ROBOT places faces there (started with --robot, or later
-    from the dashboard's Stream button). Built or not, the laptop goes on and
+    from the dashboard's Stream button; never with --sim, which deploys
+    nothing). Built or not, the laptop goes on and
     says faces are off; the robot cannot do without it (every deploy would
     stop), so neither does the run. False then."""
-    on_robot = "faces" in os.environ.get("ON_ROBOT", "").split(",")
+    on_robot = (not args.sim
+                and "faces" in os.environ.get("ON_ROBOT", "").split(","))
     if not on_robot and not any(service.name == "embed" for service in services):
         return True
     from emulator import models

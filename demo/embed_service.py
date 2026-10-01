@@ -33,7 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import numpy as np
 from PIL import Image
 
-from demo.http_util import ascii_reason
+from demo.http_util import ascii_reason, public
 
 # Decompression-bomb guard: a robot frame is under 1 Mpx.
 Image.MAX_IMAGE_PIXELS = 10_000_000
@@ -128,7 +128,7 @@ class Embedders:
             try:
                 self._faces = FaceReader()
             except Exception as exc:  # noqa: BLE001 — optional, see above
-                self.faces_off = f"{type(exc).__name__}: {exc}"
+                self.faces_off = public(f"{type(exc).__name__}: {exc}")
                 LOG.warning("embed_service: faces off — %s", self.faces_off,
                             exc_info=True)
                 raise FacesOff(self.faces_off) from exc
