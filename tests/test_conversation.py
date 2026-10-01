@@ -498,7 +498,7 @@ def test_a_memory_that_never_opened_is_not_an_empty_one():
 
     brain = _Brain(_call("remember", "my dog", about="said"),
                    {"reply": "My memory is off right now.", "token_count": 1})
-    _turn("Do you remember my dog?", brain)
+    _turn("Do you remember my dog?", brain, recall_fn=None, recall_seen_fn=None)
     assert brain.requests[1].tool_result["result"] == {"note": MEMORY_OFF_NOTE}
 
     # A memory that is there and has nothing still says so.
@@ -509,6 +509,49 @@ def test_a_memory_that_never_opened_is_not_an_empty_one():
           recall_seen_fn=lambda query, direction=None, pictures=True: [])
     assert brain.requests[1].tool_result["result"] == {
         "note": "Nothing in your memory about this."}
+
+
+def test_with_one_memory_off_the_question_is_answered_by_the_one_it_needs():
+    # Frame memory can fail to open while the words open (or the other way
+    # round): a question about the half that is there, and empty, still
+    # gets "nothing"; a question about the half that is off gets "off".
+    from demo.conversation import MEMORY_OFF_NOTE
+
+    nothing = {"note": "Nothing in your memory about this."}
+    no_words = lambda query: Recalled([], [])
+    no_frames = lambda query, direction=None, pictures=True: []
+    for about, question, words, frames, expected in (
+            ("said", "Do you remember my dog?", no_words, None, nothing),
+            ("seen", "Did you see my dog earlier?", None, no_frames, nothing),
+            ("said", "Do you remember my dog?", None, no_frames, {"note": MEMORY_OFF_NOTE}),
+            ("seen", "Did you see my dog earlier?", no_words, None, {"note": MEMORY_OFF_NOTE}),
+            ("anything", "Do you remember my dog?", no_words, None, {"note": MEMORY_OFF_NOTE})):
+        brain = _Brain(_call("remember", "my dog", about=about),
+                       {"reply": "...", "token_count": 1})
+        _turn(question, brain, recall_fn=words, recall_seen_fn=frames,
+              day_frames_fn=lambda: [])
+        assert brain.requests[1].tool_result["result"] == expected, (about, words, frames)
+
+
+def test_with_memory_off_a_general_question_is_still_a_general_one():
+    from demo.conversation import GENERAL_QUESTION_NOTE
+
+    brain = _Brain(_call("remember", "airplanes", about="anything"),
+                   {"reply": "Wings make lift.", "token_count": 1})
+    _turn("How do airplanes fly?", brain, recall_fn=None, recall_seen_fn=None)
+    assert brain.requests[1].tool_result["result"] == {"found": [], "note": GENERAL_QUESTION_NOTE}
+
+
+def test_with_memory_off_the_facts_it_was_taught_still_answer():
+    # The knowledge base is its own shard: it opens when the memory does not.
+    fact = {"text": "Qdrant Edge runs inside the robot's own process.", "score": 0.8}
+    brain = _Brain(_call("remember", "qdrant edge", about="taught"),
+                   {"reply": "It runs in my own process.", "token_count": 1})
+    _turn("Do you remember what Qdrant Edge is?", brain, recall_fn=None,
+          recall_seen_fn=None, knowledge_fn=lambda query: [fact])
+    result = brain.requests[1].tool_result["result"]
+    assert result["facts_you_were_taught"] == [fact["text"]]
+    assert "note" not in result
 
 
 def test_a_memory_that_cannot_be_read_says_so_rather_than_finding_nothing():

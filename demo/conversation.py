@@ -975,11 +975,18 @@ def _answer_tool(name, arguments, heard, history, recall_fn,
         return in_words(answer)
     if _ABOUT_THE_PAST.search(f"{heard} {query}".lower()):
         # A question about the past that nothing answers: "you never told
-        # me" is the answer, and it is a recall — not stored back. Unless a
-        # memory is not there at all (no search for it was given): then
-        # nothing was found because nothing could be, and "nothing in your
-        # memory" had the robot deny everything for the whole run.
-        if recall_fn is None or recall_seen_fn is None:
+        # me" is the answer, and it is a recall — not stored back. Unless the
+        # memory the question needed is not there at all (no search for it
+        # was given): then nothing was found because nothing could be, and
+        # "nothing in your memory" had the robot deny everything all run.
+        # One that is there and simply holds nothing still says so.
+        if about == SAID:
+            needed_is_off = recall_fn is None
+        elif about == SEEN or direction in TURNED:
+            needed_is_off = recall_seen_fn is None
+        else:
+            needed_is_off = recall_fn is None or recall_seen_fn is None
+        if needed_is_off:
             return in_words({"note": MEMORY_OFF_NOTE}, from_memory=False)
         return in_words({"note": "Nothing in your memory about this."},
                         from_memory=False)
