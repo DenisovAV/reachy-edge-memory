@@ -792,11 +792,15 @@ def _talk(heard, detections, endpoint, robot, display, conversation, *,
     try:
         done = chat_turn(
             heard, window=conversation, send=send, display=display,
-            recall_fn=lambda query: recall(
-                query, window=conversation, speech_memory=speech_memory),
-            recall_seen_fn=lambda query, direction=None, pictures=True: recall_seen(
+            # No search for a memory that is not there: the answer then says
+            # the memory is off, not that it holds nothing (conversation.py).
+            recall_fn=(lambda query: recall(
+                query, window=conversation, speech_memory=speech_memory))
+            if speech_memory is not None else None,
+            recall_seen_fn=(lambda query, direction=None, pictures=True: recall_seen(
                 query, frame_memory=frame_memory, turn_started_at=turn_started_at,
-                direction=direction, pictures=pictures),
+                direction=direction, pictures=pictures))
+            if frame_memory is not None else None,
             look_fn=looker.look if looker is not None else None,
             look_names_fn=(lambda: list(looker.names)) if looker is not None else None,
             who_fn=lambda: who(people=people, frame=frame, frame_memory=frame_memory,
