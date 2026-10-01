@@ -122,14 +122,76 @@ def test_resolve_llm_rejects_a_directory_named_like_a_litertlm_file(tmp_path):
         models.resolve_llm(str(fake))
 
 
-def test_the_face_embedder_is_optional_for_the_download(monkeypatch, capsys):
-    # Faces are optional (README): a fresh clone that has not converted
-    # HSFace yet must not see the download report a failure.
-    monkeypatch.setattr(models, "fetch", lambda spec: (_ for _ in ()).throw(
-        FileNotFoundError("missing")) if spec.path else "cached")
-    import emulator.frame_memory, emulator.memory, emulator.whisper_asr
-    monkeypatch.setattr(emulator.frame_memory, "SiglipEmbedder", lambda: None)
-    monkeypatch.setattr(emulator.memory, "_embedder", lambda name: None)
-    monkeypatch.setattr(emulator.whisper_asr, "WhisperRecognizer", lambda name: None)
-    assert models.main() == 0
-    assert "optional" in capsys.readouterr().out
+def test_a_missing_local_model_is_built_by_its_command(monkeypatch, tmp_path):
+    # The face embedder has no LiteRT build to download: fetch makes it.
+    target = tmp_path / "built.tflite"
+    ran = []
+
+    def build(cmd):
+        ran.append(cmd)
+        target.write_bytes(b"model")
+
+    monkeypatch.setattr(models, "_build", build)
+    spec = models.Model(path=target, build=("make", "it"))
+    with pytest.raises(FileNotFoundError):
+        models.fetch(spec)                    # not asked to build: fails fast
+    assert ran == []
+    assert models.fetch(spec, build=True) == target
+    assert models.fetch(spec, build=True) == target
+    assert ran == [("make", "it")], "built once, then found"
+
+
+def test_a_build_that_fails_says_how_to_get_the_model(monkeypatch, tmp_path):
+    monkeypatch.setattr(models, "_build", lambda cmd: None)
+    spec = models.Model(path=tmp_path / "x.tflite", build=("make", "it"),
+                        how_to_get="run the converter")
+    with pytest.raises(FileNotFoundError, match="run the converter"):
+        models.fetch(spec, build=True)
+
+
+def test_a_build_that_exits_with_an_error_is_a_failure(monkeypatch, tmp_path):
+    # A converter that stops half way may leave nothing behind, or may not:
+    # its exit code says which, not the file.
+    target = tmp_path / "x.tflite"
+
+    def broken(cmd):
+        target.write_bytes(b"half")
+        return 3
+
+    monkeypatch.setattr(models, "_build", broken)
+    spec = models.Model(path=target, build=("make", "it"), how_to_get="run the converter")
+    with pytest.raises(FileNotFoundError, match=r"exit 3.*run the converter"):
+        models.fetch(spec, build=True)
+
+
+def test_a_machine_without_the_build_tool_is_told_why(monkeypatch, tmp_path):
+    def no_uv(cmd):
+        raise FileNotFoundError(2, "No such file or directory", "uv")
+
+    monkeypatch.setattr(models, "_build", no_uv)
+    spec = models.Model(path=tmp_path / "x.tflite", build=("uv", "run"),
+                        how_to_get="run the converter")
+    with pytest.raises(FileNotFoundError, match=r"could not be built.*uv"):
+        models.fetch(spec, build=True)
+
+
+def test_a_named_model_that_cannot_be_had_fails_the_command(monkeypatch, capsys):
+    # scripts/robot_service.sh stops the deploy on this exit code.
+    def missing(name, build=False):
+        raise FileNotFoundError("could not be built")
+
+    monkeypatch.setattr(models, "fetch", missing)
+    assert models.main(["hsface"]) == 1
+    assert "MISSING" in capsys.readouterr().out
+
+
+def test_the_face_embedder_is_built_not_asked_for():
+    spec = models.get("hsface")
+    assert spec.build and "scripts/convert_hsface.py" in spec.build
+
+
+def test_named_models_alone_can_be_fetched(monkeypatch, capsys):
+    fetched = []
+    monkeypatch.setattr(models, "fetch", lambda name, build=False: fetched.append((name, build)) or "path")
+    assert models.main(["hsface"]) == 0
+    assert fetched == [("hsface", True)]

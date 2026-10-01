@@ -184,13 +184,12 @@ for name in sys.argv[1:]:
   fi
   case ",$ON_ROBOT," in
     *,faces,*)
-      # The face embedder is the one model not on the Hub: converted into
-      # assets/ by scripts/convert_hsface.py. 175 MB.
-      if [ ! -f "$REPO/assets/hsface10k.tflite" ]; then
-        echo "faces on the robot need the face embedder converted first:" >&2
-        echo "  uv run --with torch --with litert-torch python scripts/convert_hsface.py" >&2
+      # The face embedder is the one model not on the Hub: built here, on
+      # the laptop, the first time (emulator/models.py). 175 MB.
+      (cd "$REPO" && uv run --quiet python -m emulator.models hsface) || {
+        echo "faces on the robot need the face embedder, and it could not be built" >&2
         exit 1
-      fi
+      }
       ssh_robot "mkdir -p '$REMOTE_DIR/assets'"
       rsync -a -e "ssh -o ConnectTimeout=10" "$REPO/assets/hsface10k.tflite" \
         "$USER_AT:$REMOTE_DIR/assets/"

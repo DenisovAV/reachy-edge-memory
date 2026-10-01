@@ -256,8 +256,14 @@ def test_only_the_named_families_models_are_carried():
         case = block.index(f"*,{family},*")
         assert model in block[case:case + 700], f"{family} must bring {model}"
     faces = block.rindex("*,faces,*")
-    assert "hsface10k.tflite" in block[faces:faces + 500], (
+    assert "hsface10k.tflite" in block[faces:faces + 700], (
         "the face embedder is the one model not on the Hub")
+    assert "emulator.models hsface" in block[faces:faces + 700], (
+        "and it is built on the laptop first, not asked of the person")
+    built = block.index("emulator.models hsface", faces)
+    carried = block.index("assets/hsface10k.tflite", faces)
+    assert built < block.index("exit 1", built) < carried, (
+        "a model that could not be built stops the deploy before the copy")
     assert "carried to the robot:" in block, "the deploy says what it sent"
 
 

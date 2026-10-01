@@ -147,6 +147,28 @@ def test_faces_on_the_robot_are_read_the_way_the_laptops_are(monkeypatch, tmp_pa
     people.close()
 
 
+def test_faces_the_laptop_does_not_have_are_off_on_the_robot_too(monkeypatch, tmp_path, capsys):
+    # The embed service says so in its health; asking it every frame instead
+    # would only collect 503s.
+    from demo import embed_client, run_demo
+
+    monkeypatch.setattr(embed_client, "faces_off",
+                        lambda host, port: "FileNotFoundError: hsface10k.tflite is missing")
+    monkeypatch.setattr(embed_client, "RemoteFaceReader",
+                        lambda *a, **k: pytest.fail("faces asked of a laptop without them"))
+    people = run_demo.build_people(args(memory_dir=str(tmp_path), brain="127.0.0.1"))
+    assert "faces disabled" in capsys.readouterr().out
+    assert not people.enabled
+    people.close()
+
+
+def test_a_family_this_run_turned_off_is_reported_off():
+    lines = placement.report(args(), models={"faces": "YuNet + HSFace"},
+                             addresses={"faces": "mac:9900"}, off=("faces",))
+    assert "  face models: off" in lines
+    assert not any("YuNet" in line for line in lines)
+
+
 def test_the_detector_source_is_the_mac_service_by_default():
     from demo.detect_source import GpuDetectSource
     from demo.run_demo import build_detect_source

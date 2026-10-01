@@ -69,9 +69,11 @@ def on_robot(args, family: str) -> bool:
 
 
 def report(args, *, models: dict[str, str] | None = None,
-           addresses: dict[str, str] | None = None) -> list[str]:
+           addresses: dict[str, str] | None = None,
+           off: Iterable[str] = ()) -> list[str]:
     """One line per family for the start log: where it runs, which model, and
-    for the Mac ones the address it will be called on.
+    for the Mac ones the address it will be called on — or that this run has
+    it `off` (faces without their models), not where it would have run.
 
     A run is verified from this and nothing else — which is why the model's
     name is on the line too: recognition is not the same model on both sides
@@ -83,6 +85,9 @@ def report(args, *, models: dict[str, str] | None = None,
     addresses = addresses or {}
     lines = []
     for family in FAMILIES:
+        if family in off:
+            lines.append(f"  {LABELS[family]}: off")
+            continue
         place = placements[family]
         line = f"  {LABELS[family]}: {'robot' if place == ROBOT else 'Mac'}"
         model = models.get(family)

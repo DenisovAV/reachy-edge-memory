@@ -209,6 +209,25 @@ def test_local_source_finds_faces_on_every_cycle_like_the_remote_one():
     assert source.faces() == [{"box": [0.1, 0.1, 0.2, 0.2], "score": 0.9}]
 
 
+def test_faces_that_fail_leave_the_objects_found_with_them():
+    # The robot's detector asks the laptop for face boxes; a laptop without
+    # them must not blind the robot to everything else in the frame.
+    from demo.detect_source import LocalDetectSource
+    from emulator.detector import Detection
+
+    def faces(frame):
+        raise OSError("HTTP Error 503: faces off")
+
+    heard = []
+    source = LocalDetectSource(FakeCamera(FRAME),
+                               FakeDetector([Detection(41, 0.8, (0.4, 0.4, 0.6, 0.6))]),
+                               faces=faces)
+    source.add_listener(heard.append)
+    source._cycle()
+    assert heard == [[{"label": "cup", "score": 0.8, "box": [0.4, 0.4, 0.6, 0.6]}]]
+    assert source.faces() == []
+
+
 def test_local_source_notifies_the_same_listeners():
     from demo.detect_source import LocalDetectSource
 

@@ -81,6 +81,10 @@ def _frame(body: dict) -> np.ndarray:
         raise BadRequest(f"not a readable JPEG: {type(exc).__name__}: {exc}") from exc
 
 
+class FacesOff(RuntimeError):
+    """The face models could not be loaded; answered 503, with why."""
+
+
 class Embedders:
     """Both embedders, loaded once and shared across requests.
 
@@ -93,6 +97,8 @@ class Embedders:
         self._siglip = None
         self._bge = None
         self._faces = None
+        self._face_boxes = None
+        self.faces_off: str | None = None
 
     def siglip(self):
         if self._siglip is None:
@@ -111,12 +117,35 @@ class Embedders:
         return self._bge
 
     def faces(self):
+        """The face models — or FacesOff, why, from the first failure on: they
+        are optional, and a frame a second asking again would only repeat it."""
+        if self.faces_off:
+            raise FacesOff(self.faces_off)
         if self._faces is None:
             from emulator.face import FaceReader
 
             LOG.info("embed_service: loading the face models...")
-            self._faces = FaceReader()
+            try:
+                self._faces = FaceReader()
+            except Exception as exc:  # noqa: BLE001 — optional, see above
+                self.faces_off = f"{type(exc).__name__}: {exc}"
+                LOG.warning("embed_service: faces off — %s", self.faces_off,
+                            exc_info=True)
+                raise FacesOff(self.faces_off) from exc
         return self._faces
+
+    def face_boxes(self):
+        """Where the faces are, without who: the robot's own detect loop
+        (`--on-robot detector`) keeps its head on a face with these. YuNet
+        alone, as demo/gpu_detect.py reads them — faces off must not take
+        the head tracking, and the objects found with it, along."""
+        if self._faces is not None:
+            return self._faces
+        if self._face_boxes is None:
+            from emulator.face import FaceReader
+
+            self._face_boxes = FaceReader(identities=False)
+        return self._face_boxes
 
     def warm(self) -> None:
         """Pay both load costs before the robot is waiting on a turn."""
@@ -124,10 +153,11 @@ class Embedders:
         next(iter(self.bge().embed(["warm"])))
         try:
             self.faces()
-        except Exception as exc:  # noqa: BLE001 — see below
+        except FacesOff:
             # The face models are optional: everything else works without
-            # them, and saying so once here beats failing on the first face.
-            LOG.warning("embed_service: no face models (%s)", exc)
+            # them, and saying so once here (faces() did) beats failing on
+            # the first face.
+            pass
 
 
 def make_handler(embedders: Embedders):
@@ -173,6 +203,8 @@ def make_handler(embedders: Embedders):
                 LOG.warning("embed_service: bad request to %s: %s",
                             self.path, exc)
                 self.send_error(400, ascii_reason(str(exc)))
+            except FacesOff as exc:  # said once, when they failed to load
+                self.send_error(503, ascii_reason(f"faces off: {exc}"))
             except Exception as exc:  # noqa: BLE001 — the service must survive
                 LOG.exception("embed_service: %s", type(exc).__name__)
                 try:
@@ -185,10 +217,12 @@ def make_handler(embedders: Embedders):
                 # The models this service embeds with, so the robot can
                 # check them against the ones that wrote its memory
                 # (emulator/embed_identity.py) without guessing from a
-                # version number or a path.
+                # version number or a path. And whether it has faces, so the
+                # robot turns them off instead of asking every frame.
                 from emulator.embed_identity import current as _embedders
 
-                self._send_json({"healthy": True, "embedders": _embedders()})
+                self._send_json({"healthy": True, "embedders": _embedders(),
+                                 "faces_off": embedders.faces_off})
             else:
                 self.send_error(404)
 
@@ -204,7 +238,9 @@ def make_handler(embedders: Embedders):
             people it has met."""
             body = self._read_json()
             frame = _frame(body)
-            faces = embedders.faces().read(frame, embed=body.get("embed", True))
+            embed = body.get("embed", True)
+            reader = embedders.faces() if embed else embedders.face_boxes()
+            faces = reader.read(frame, embed=embed)
             self._send_json({"faces": [
                 {"box": face.box, "score": face.score,
                  "embedding": face.embedding} for face in faces]})

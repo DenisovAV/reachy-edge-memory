@@ -173,6 +173,7 @@ def test_a_ctrl_c_while_the_models_load_stops_what_was_started(monkeypatch):
     monkeypatch.setattr(stage, "port_answers", lambda port: False)
     monkeypatch.setattr(stage, "_refresh_knowledge", lambda: None)
     monkeypatch.setattr(stage, "_stop_on_sigterm", lambda: None)
+    monkeypatch.setattr(stage, "_ensure_face_model", lambda *a: True)
     monkeypatch.setattr(stage, "_finish_undisturbed", lambda: None)
     monkeypatch.setattr(stage, "_robot", lambda *a: pytest.fail("robot touched"))
     assert main(["--skip", "embed", "--skip", "serve", "--skip", "detect"]) == 0
@@ -623,6 +624,7 @@ def _sim(monkeypatch, *, ready, exits=(), codes=(), wiped=True, emulator=True):
     monkeypatch.setattr(stage, "_stop_on_sigterm", lambda: None)
     monkeypatch.setattr(stage, "_finish_undisturbed", lambda: None)
     monkeypatch.setattr(stage, "wipe_memory", wipe)
+    monkeypatch.setattr(stage, "_ensure_face_model", lambda *a: True)
     return stage.main(["--sim"]), events
 
 
@@ -821,3 +823,92 @@ def test_the_exit_code_is_waited_for_not_read_too_early():
     supervisor.add(Service("voice", ["y"], 8091, "Speech threshold"))
     assert supervisor.returncode("voice") == 42
     assert process.waited and process.waited[0] is not None, "waited, but not forever"
+
+
+# — the face model —
+
+def _face_build(monkeypatch, *, built):
+    """emulator.models.fetch for the face embedder, recording each ask."""
+    from emulator import models
+
+    asked = []
+
+    def fetch(name, build=False):
+        asked.append((name, build))
+        if not built:
+            raise FileNotFoundError("hsface10k.tflite could not be built (exit 1)")
+        return "assets/hsface10k.tflite"
+
+    monkeypatch.setattr(models, "fetch", fetch)
+    return asked
+
+
+def test_a_face_model_that_cannot_be_built_leaves_faces_off_and_says_so(monkeypatch, capsys):
+    from demo.stage import _ensure_face_model
+
+    asked = _face_build(monkeypatch, built=False)
+    args = _args()
+    assert _ensure_face_model(args, build_services(args)) is True
+    assert "faces off" in capsys.readouterr().out
+    assert asked == [("hsface", True)], "stage is the one place the model is built"
+
+
+def test_faces_on_the_robot_without_their_model_stop_the_start(monkeypatch, capsys):
+    # The deploy cannot carry a model that is not there: said once, here,
+    # before minutes of starting services — not "faces off" and on anyway.
+    import demo.stage as stage
+
+    _face_build(monkeypatch, built=False)
+    monkeypatch.setenv("ON_ROBOT", "detector,faces")
+    monkeypatch.setattr(stage, "port_answers", lambda port, host="127.0.0.1": False)
+    monkeypatch.setattr(stage, "_refresh_knowledge", lambda: None)
+    monkeypatch.setattr(stage, "Supervisor", lambda services: pytest.fail("started"))
+    assert stage.main(["--robot", "--robot-host", "reachy"]) == 1
+    out = capsys.readouterr().out
+    assert "faces on the robot need the face embedder" in out
+    assert "faces off" not in out
+
+
+def test_the_face_model_is_built_only_for_whoever_uses_it(monkeypatch):
+    from demo.stage import _ensure_face_model
+
+    asked = _face_build(monkeypatch, built=True)
+    monkeypatch.delenv("ON_ROBOT", raising=False)
+    no_embed = _args("--skip", "embed")
+    assert _ensure_face_model(no_embed, build_services(no_embed)) is True
+    assert asked == [], "nothing here reads faces: no two-minute build"
+    monkeypatch.setenv("ON_ROBOT", "faces")
+    # Without --robot too: the dashboard's Stream button deploys it later.
+    on_robot = _args("--skip", "embed")
+    assert _ensure_face_model(on_robot, build_services(on_robot)) is True
+    assert asked == [("hsface", True)], "the robot does"
+
+
+def test_the_face_model_is_ready_before_any_service_starts(monkeypatch):
+    import demo.stage as stage
+
+    order = []
+
+    class Recording:
+        def __init__(self, services):
+            pass
+
+        def start(self):
+            order.append("start")
+
+        def wait_ready(self, timeout=None):
+            raise KeyboardInterrupt
+
+        def stop(self):
+            pass
+
+    monkeypatch.setattr(stage, "Supervisor", Recording)
+    monkeypatch.setattr(stage, "port_answers", lambda port, host="127.0.0.1": False)
+    monkeypatch.setattr(stage, "_refresh_knowledge", lambda: None)
+    monkeypatch.setattr(stage, "_stop_on_sigterm", lambda: None)
+    monkeypatch.setattr(stage, "_finish_undisturbed", lambda: None)
+    monkeypatch.setattr(stage, "_ensure_face_model",
+                        lambda *a: order.append("faces") or True)
+    assert stage.main(["--skip", "serve", "--skip", "detect"]) == 0
+    assert order == ["faces", "start"]
+

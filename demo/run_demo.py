@@ -1166,8 +1166,11 @@ def build_people(args):
 
             reader = _FaceReaderAsDicts(FaceReader())
         else:
-            from demo.embed_client import RemoteFaceReader
+            from demo.embed_client import RemoteFaceReader, faces_off
 
+            off = faces_off(_brain(args), _embed_port(args))
+            if off:
+                raise RuntimeError(f"the laptop has no face models: {off}")
             reader = RemoteFaceReader(_brain(args), _embed_port(args))
     except Exception as exc:  # noqa: BLE001 — faces are optional on the laptop
         if local:
@@ -1381,7 +1384,8 @@ def run_voice(args, endpoint) -> int:
                 addresses={"asr": f"{args.brain}:{args.port}",
                            "tts": f"{args.brain}:{args.port}",
                            "detector": f"{args.brain}:{args.gpu_detect_port}",
-                           "faces": embed_at, "embedder": embed_at}):
+                           "faces": embed_at, "embedder": embed_at},
+                off=() if people.enabled else ("faces",)):
             print(line)
         # A fixed speech threshold, not one calibrated at start. Calibrated
         # from one second of sound, it came out anywhere from 0.010 to 0.114
