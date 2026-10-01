@@ -102,6 +102,18 @@ ready. It uses the system's default camera and microphone; for another one,
 pass `--video` / `--audio` with the index
 `ffmpeg -f avfoundation -list_devices true -i ""` prints.
 
+## Run it with a Raspberry Pi 5 — coming soon
+
+The models on a Raspberry Pi 5 instead of the laptop, the robot simulated on
+the Mac:
+
+```bash
+PI=raspberrypi.local ./demo/launch.sh
+```
+
+This mode is being moved onto the current services and tested on the board;
+until it lands, the command says so and stops.
+
 ## Run it with the robot
 
 Once, on the robot: the voice loop runs in the robot daemon's own Python, which
