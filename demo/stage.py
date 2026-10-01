@@ -37,6 +37,7 @@ import os
 import signal
 import socket
 import subprocess
+import shutil
 import sys
 import threading
 import time
@@ -48,7 +49,20 @@ READY_TIMEOUT_S = 240.0
 STOP_GRACE_S = 5.0
 
 _COLOURS = {"embed": "\033[35m", "serve": "\033[36m", "detect": "\033[33m",
-            "dash": "\033[32m"}
+            "dash": "\033[32m", "voice": "\033[34m"}
+# How long the voice loop may take to say it listens, once the models are up:
+# the camera warms up first (demo/run_demo.py's run_voice, up to ~6 s).
+VOICE_READY_TIMEOUT_S = 60.0
+# How long it gets to exit: it stops the camera and the scene writer (up to
+# ~6 s each) before it saves the rest of the conversation — 20 s, as
+# scripts/robot_service.sh gives it on the robot, so it is never killed
+# mid-save.
+VOICE_STOP_GRACE_S = 20.0
+# The Reachy Mini daemon's port — the emulator's too (demo/robot_reachy.py).
+EMULATOR_PORT = 8000
+# demo/run_demo.py's: the voice loop's exit when the dashboard's Restart was
+# pressed (a test keeps the two equal; scripts/voice_loop.sh has it too).
+RESTART_EXIT_CODE = 42
 _RESET = "\033[0m"
 
 
@@ -64,6 +78,8 @@ class Service:
     # (see each module's main()), and that is a more honest readiness signal
     # than an open port: serve.py binds BEFORE it warms the models up.
     ready: str
+    # Seconds between SIGTERM and SIGKILL on the way out.
+    stop_grace: float = STOP_GRACE_S
 
 
 def build_services(args) -> list[Service]:
@@ -85,13 +101,77 @@ def build_services(args) -> list[Service]:
                            "--port", str(args.gpu_detect_port),
                            "--host", "0.0.0.0"],
                 args.gpu_detect_port, "gpu_detect on"),
-        Service("dash", [python, "-u", "-m", "demo.display.web",
-                         "--port", str(args.web_port),
-                         "--robot-host", args.robot_host],
-                args.web_port, "dashboard on"),
     ]
+    if not args.sim:
+        # With --sim the voice loop runs here and serves the dashboard itself,
+        # on the laptop's own camera; a second one would want the same port.
+        services.append(
+            Service("dash", [python, "-u", "-m", "demo.display.web",
+                             "--port", str(args.web_port),
+                             "--robot-host", args.robot_host],
+                    args.web_port, "dashboard on"))
     skip = set(args.skip or ())
     return [s for s in services if s.name not in skip]
+
+
+# Where the voice loop keeps its memory with --sim (its Qdrant Edge shards).
+SIM_MEMORY_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              "results", "memory")
+
+
+def voice_loop_service(args) -> Service:
+    """The voice loop on this machine, for --sim: the laptop's camera,
+    microphone and speaker, the models just started here, the emulator's
+    daemon at --robot-host — and the dashboard, which it serves itself."""
+    return Service("voice", [sys.executable, "-u", "-m", "demo.run_demo",
+                             "--brain", "127.0.0.1", "--port", str(args.port),
+                             "--gpu-detect-port", str(args.gpu_detect_port),
+                             "--embed-port", str(args.embed_port),
+                             "--web-port", str(args.web_port),
+                             "--robot-host", args.robot_host,
+                             "--video", args.video, "--audio", args.audio,
+                             "--memory-dir", SIM_MEMORY_DIR],
+                   args.web_port, "Speech threshold", stop_grace=VOICE_STOP_GRACE_S)
+
+
+def wipe_memory(memory_dir: str) -> bool:
+    """The dashboard's Restart with --sim, as scripts/voice_loop.sh does it on
+    the robot: between two runs (the shards are closed by now), the memory is
+    moved aside, not deleted — and only the last one is kept, as -previous.
+    False, and why, when it could not be moved."""
+    memory_dir = memory_dir.rstrip(os.sep)
+    previous = memory_dir + "-previous"
+    if not os.path.isdir(memory_dir):
+        print(f"  memory: nothing at {memory_dir} to clear", flush=True)
+        return True
+    try:
+        if os.path.exists(previous):
+            shutil.rmtree(previous)
+        os.rename(memory_dir, previous)
+    except OSError as exc:
+        print(f"  memory: could not move {memory_dir} aside ({exc})", flush=True)
+        return False
+    print(f"  memory: cleared — the old one is kept as {previous}", flush=True)
+    return True
+
+
+def start_voice_loop(supervisor, args) -> bool:
+    """With --sim: start the voice loop and wait until it listens. Restart
+    pressed at any point — even while it is still starting — moves the memory
+    aside and starts it again, as scripts/voice_loop.sh does on the robot.
+    False, said, when it did not come up."""
+    while True:
+        supervisor.add(voice_loop_service(args))
+        late = supervisor.wait_ready(VOICE_READY_TIMEOUT_S)
+        if not late:
+            return True
+        if (late == ["voice"]
+                and supervisor.returncode("voice") == RESTART_EXIT_CODE):
+            if not wipe_memory(SIM_MEMORY_DIR):
+                return False
+            continue
+        print(f"  did not come up: {', '.join(late)} — stopping the rest")
+        return False
 
 
 def port_answers(port: int, host: str = "127.0.0.1",
@@ -146,16 +226,48 @@ class Supervisor:
         self._ready: dict[str, threading.Event] = {}
         self._exited = threading.Event()
         self._dead: list[str] = []
+        self._added: set[str] = set()
+        # A service started again (add) and the output thread of its last
+        # run finishing: one at a time, or the old run's end would mark the
+        # new one dead.
+        self._lock = threading.Lock()
 
     def start(self) -> None:
         """Start every service at once — they spend their first seconds
         loading models, and doing that in parallel is the whole point."""
         for service in self._services:
-            process = self._spawn(service)
-            self._processes[service.name] = process
-            self._ready[service.name] = threading.Event()
-            threading.Thread(target=self._pump, args=(service, process),
-                             daemon=True).start()
+            self._start(service)
+
+    def add(self, service: Service) -> None:
+        """Start one more, once the others are up (the voice loop, which
+        needs the models answering), or start it again after it exited.
+        Stopped before the others on the way out."""
+        with self._lock:
+            self._services = [s for s in self._services if s.name != service.name]
+            self._services.append(service)
+            self._added.add(service.name)
+            if service.name in self._dead:
+                self._dead.remove(service.name)
+                if not self._dead:
+                    self._exited.clear()
+            self._start(service)
+
+    def returncode(self, name: str) -> int | None:
+        """How a service ended. Asked once its output has closed — the
+        process may still be a moment from being reaped, so it is waited
+        for, briefly, rather than read as "still running"."""
+        try:
+            return self._processes[name].wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            return None
+
+    def _start(self, service: Service) -> None:
+        process = self._spawn(service)
+        ready = threading.Event()
+        self._processes[service.name] = process
+        self._ready[service.name] = ready
+        threading.Thread(target=self._pump, args=(service, process, ready),
+                         daemon=True).start()
 
     def wait_ready(self, timeout: float = READY_TIMEOUT_S) -> list[str]:
         """Block until every service has announced itself; returns the names
@@ -181,16 +293,27 @@ class Supervisor:
         return self._dead[0] if self._dead else None
 
     def stop(self) -> None:
-        for name, process in self._processes.items():
+        # Those added after the others stop first, on their own: the voice
+        # loop saves what is left of the conversation on the way out, and
+        # that needs the embeddings it was started after still answering.
+        names = list(self._processes)
+        self._stop([name for name in names if name in self._added])
+        self._stop([name for name in names if name not in self._added])
+
+    def _stop(self, names: list[str]) -> None:
+        for name in names:
+            process = self._processes[name]
             if process.poll() is not None:
                 continue
             try:
                 self._send_signal(process, signal.SIGTERM)
             except (ProcessLookupError, PermissionError) as exc:
                 self._write(name, f"could not stop: {type(exc).__name__}: {exc}")
-        deadline = time.monotonic() + STOP_GRACE_S
-        for name, process in self._processes.items():
-            left = max(0.0, deadline - time.monotonic())
+        started = time.monotonic()
+        grace = {service.name: service.stop_grace for service in self._services}
+        for name in names:
+            process = self._processes[name]
+            left = max(0.0, started + grace.get(name, STOP_GRACE_S) - time.monotonic())
             try:
                 process.wait(timeout=left)
             except subprocess.TimeoutExpired:
@@ -202,17 +325,20 @@ class Supervisor:
 
     # — output —
 
-    def _pump(self, service: Service, process) -> None:
+    def _pump(self, service: Service, process, ready: threading.Event) -> None:
         for line in process.stdout:
             text = line.rstrip("\n")
             self._write(service.name, text)
             if service.ready in text:
-                self._ready[service.name].set()
+                ready.set()
         # stdout closed: the service is on its way out. Unblock wait_ready so
         # a service that died during startup is reported instead of waited on.
-        self._ready[service.name].set()
-        self._dead.append(service.name)
-        self._exited.set()
+        ready.set()
+        with self._lock:
+            if self._processes.get(service.name) is not process:
+                return  # an earlier run of a service started again since
+            self._dead.append(service.name)
+            self._exited.set()
 
     def _write(self, name: str, text: str) -> None:
         prefix = f"{name:>6} | "
@@ -454,12 +580,23 @@ def parse_args(argv=None):
                    help="demo/gpu_detect.py — the object detector")
     p.add_argument("--web-port", type=int, default=DEFAULT_DASHBOARD_PORT,
                    help="the dashboard, and where the robot pushes its events")
-    p.add_argument("--robot-host", default="reachy-mini.local",
-                   help="the robot, for the dashboard's live camera view")
-    p.add_argument("--robot", action="store_true",
-                   help="also bring the robot up (scripts/robot_service.sh: "
-                        "camera and microphone, then the voice loop) and stop "
-                        "it again on the way out")
+    p.add_argument("--robot-host", default=None,
+                   help="the robot: reachy-mini.local by default, the "
+                        "emulator on this machine (127.0.0.1) with --sim")
+    where = p.add_mutually_exclusive_group()
+    where.add_argument("--robot", action="store_true",
+                       help="also bring the robot up (scripts/robot_service.sh: "
+                            "camera and microphone, then the voice loop) and "
+                            "stop it again on the way out")
+    where.add_argument("--sim", action="store_true",
+                       help="no robot: run the voice loop here too, with this "
+                            "machine's camera, microphone and speaker, against "
+                            "the Reachy Mini emulator — it serves the dashboard")
+    p.add_argument("--video", default="default",
+                   help="with --sim: the camera, \"default\" or an ffmpeg "
+                        "avfoundation index (passed to demo/run_demo.py)")
+    p.add_argument("--audio", default="default",
+                   help="with --sim: the microphone, the same way")
     p.add_argument("--llm", default=None, help="passed to demo/serve.py")
     p.add_argument("--asr", choices=("whisper", "moonshine"), default="whisper",
                    help="passed to demo/serve.py")
@@ -470,18 +607,27 @@ def parse_args(argv=None):
     p.add_argument("--skip", action="append", metavar="NAME",
                    choices=("embed", "serve", "detect", "dash"),
                    help="do not start this service (repeatable)")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if args.robot_host is None:
+        args.robot_host = "127.0.0.1" if args.sim else "reachy-mini.local"
+    return args
 
 
 def main(argv=None) -> int:
     args = parse_args(argv)
     services = build_services(args)
 
-    for service in services:
+    if args.sim and not port_answers(EMULATOR_PORT, args.robot_host):
+        print(f"no robot answers at {args.robot_host}:{EMULATOR_PORT} — start the "
+              "emulator first:\n  mjpython -m reachy_mini.daemon.app.main --sim --no-media")
+        return 1
+    for service in services + ([voice_loop_service(args)] if args.sim else []):
         if port_answers(service.port):
+            why = ("the voice loop's dashboard could not bind it"
+                   if service.name == "voice" else
+                   f"{service.name} would bind 0.0.0.0 and lose the loopback to it")
             print(f"port {service.port} already answers — something else is "
-                  f"running there ({service.name} would bind 0.0.0.0 and lose "
-                  f"the loopback to it). Stop it, or pass a different port.")
+                  f"running there ({why}). Stop it, or pass a different port.")
             return 1
 
     _refresh_knowledge()
@@ -503,11 +649,17 @@ def main(argv=None) -> int:
         if late:
             print(f"  did not come up: {', '.join(late)} — stopping the rest")
             return 1
+        # The models answer: now the voice loop, which needs them.
+        if args.sim and not start_voice_loop(supervisor, args):
+            return 1
 
-        print(f"\n  ready. dashboard http://{brain}:{args.web_port}"
+        dashboard_host = "127.0.0.1" if args.sim else brain
+        print(f"\n  ready. dashboard http://{dashboard_host}:{args.web_port}"
               f"   ·   brain {brain}:{args.port}")
         streaming = False
-        if args.robot:
+        if args.sim:
+            print("  the voice loop runs here, against the emulator — just talk")
+        elif args.robot:
             robot_up = True
             streaming = (_robot(script, "start", robot)
                          and _robot(script, "voice-start", robot))
@@ -522,9 +674,24 @@ def main(argv=None) -> int:
                   if any(service.name == "dash" for service in services) else None)
         print("  Ctrl-C stops everything.\n")
 
-        dead = supervisor.wait()
-        if dead:
-            print(f"\n  {dead} exited — stopping the rest")
+        while True:
+            dead = supervisor.wait()
+            if args.sim and dead == "voice":
+                code = supervisor.returncode("voice")
+                if code == RESTART_EXIT_CODE:
+                    # Restart from the dashboard: on the robot
+                    # scripts/voice_loop.sh does this; here it is the
+                    # launcher's job.
+                    if not (wipe_memory(SIM_MEMORY_DIR)
+                            and start_voice_loop(supervisor, args)):
+                        return 1
+                    print("  started over — just talk", flush=True)
+                    continue
+                print(f"\n  the voice loop ended (exit {code}) — stopping the rest")
+                return 0 if code == 0 else 1
+            if dead:
+                print(f"\n  {dead} exited — stopping the rest")
+            break
     except KeyboardInterrupt:
         print("\n  stopping")
     finally:

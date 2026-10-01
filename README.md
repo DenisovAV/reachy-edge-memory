@@ -83,24 +83,22 @@ The Reachy Mini simulator (MuJoCo) runs the robot's own daemon, so the demo
 talks to it exactly as it talks to the real one. Install it in an environment
 of its own, per Pollen's guide:
 [Reachy Mini simulation](https://huggingface.co/docs/reachy_mini/platforms/simulation/get_started).
-Then, in three terminals:
+Then, in two terminals:
 
 ```bash
 # 1. the robot, simulated — no camera or microphone of its own
 mjpython -m reachy_mini.daemon.app.main --sim --no-media
 
-# 2. the models (everything but the standalone dashboard)
-uv run python -m demo.stage --skip dash
-
-# 3. the voice loop, with the laptop's camera, microphone and speaker
-uv run python -m demo.run_demo --brain 127.0.0.1 --robot-host 127.0.0.1
+# 2. everything else: the models, and the voice loop with the laptop's
+#    camera, microphone and speaker
+uv run python -m demo.stage --sim
 ```
 
 Open <http://127.0.0.1:8091> and talk to it. The first start takes a minute
-while the models load; the language model warms up before `stage` says it is
-ready. It uses the system's default camera and microphone; for another one,
-pass `--video` / `--audio` with the index
-`ffmpeg -f avfoundation -list_devices true -i ""` prints.
+while the models load; the voice loop starts once they are up, and `stage`
+says when it listens. It uses the system's default camera and microphone; for
+another one, pass `--video` / `--audio` with the index
+`ffmpeg -f avfoundation -list_devices true -i ""` prints. Ctrl-C stops it all.
 
 ## Run it with a Raspberry Pi 5 — coming soon
 

@@ -6,6 +6,7 @@ import signal
 import pytest
 import socket
 import subprocess
+import threading
 import time
 
 from demo.stage import (Service, Supervisor, _robot, _stop_on_sigterm,
@@ -70,6 +71,44 @@ def test_every_service_accepts_the_command_line_it_is_started_with():
             embed_service.main(services["embed"].argv[4:])
         except KeyboardInterrupt:
             pass
+
+
+def test_sim_runs_the_voice_loop_here_and_no_second_dashboard():
+    # Without a robot the voice loop runs on this machine and serves the
+    # dashboard itself, on this machine's camera: a standalone one would want
+    # the same port. Nobody has to say --skip anything.
+    from demo import run_demo
+    from demo.stage import voice_loop_service
+
+    args = _args("--sim", "--port", "9501", "--web-port", "8081", "--video", "1")
+    assert [s.name for s in build_services(args)] == ["embed", "serve", "detect"]
+    voice = voice_loop_service(args)
+    parsed = run_demo.parse_args(voice.argv[4:])
+    assert (parsed.brain, parsed.robot_host) == ("127.0.0.1", "127.0.0.1")
+    assert (parsed.port, parsed.web_port, voice.port) == (9501, 8081, 8081)
+    assert (parsed.video, parsed.audio) == ("1", "default")
+
+
+def test_the_robot_is_the_emulator_with_sim_and_the_reachy_otherwise():
+    assert _args("--sim").robot_host == "127.0.0.1"
+    assert _args().robot_host == "reachy-mini.local"
+    assert _args("--sim", "--robot-host", "10.0.0.5").robot_host == "10.0.0.5"
+    with pytest.raises(SystemExit):
+        _args("--sim", "--robot")
+
+
+def test_what_was_added_last_stops_first_and_alone():
+    # The voice loop saves the rest of the conversation on its way out, and
+    # needs the embeddings it was started after still answering.
+    services = [Service("embed", ["x"], 9900, "embed_service on")]
+    processes = {"embed": _FakeProcess(_running(["embed_service on\n"])),
+                 "voice": _FakeProcess(_running(["Speech threshold\n"]))}
+    supervisor, sent, _out = _supervisor(services, processes)
+    supervisor.start()
+    supervisor.add(Service("voice", ["y"], 8091, "Speech threshold"))
+    assert supervisor.wait_ready(timeout=2.0) == []
+    supervisor.stop()
+    assert [process for process, _sig in sent] == [processes["voice"], processes["embed"]]
 
 
 def test_skip_leaves_a_service_out():
@@ -511,3 +550,274 @@ def test_the_shutdown_waits_for_a_press_it_is_still_serving():
     finally:
         gate.set()
         dash.close()
+
+
+# — Restart under --sim —
+
+def test_the_restart_code_is_the_voice_loops():
+    from demo import run_demo, stage
+
+    assert stage.RESTART_EXIT_CODE == run_demo.RESTART_EXIT_CODE
+
+
+def test_a_restart_moves_the_memory_aside_and_keeps_only_the_last(tmp_path):
+    from demo.stage import wipe_memory
+
+    memory = tmp_path / "memory"
+    (memory / "people").mkdir(parents=True)
+    (memory / "people" / "Sasha").write_text("first run")
+    assert wipe_memory(str(memory))
+    assert not memory.exists()
+    assert (tmp_path / "memory-previous" / "people" / "Sasha").read_text() == "first run"
+    (memory / "people").mkdir(parents=True)
+    (memory / "people" / "Robin").write_text("second run")
+    wipe_memory(str(memory))
+    assert not (tmp_path / "memory-previous" / "people" / "Sasha").exists()
+    assert (tmp_path / "memory-previous" / "people" / "Robin").exists()
+    assert wipe_memory(str(memory))          # nothing there: says so, no error
+
+
+def _sim(monkeypatch, *, ready, exits=(), codes=(), wiped=True, emulator=True):
+    """main(["--sim"]) against a scripted Supervisor: `ready` is what each
+    wait_ready returns (the models first, then each start of the voice loop),
+    `exits` what each wait returns (KeyboardInterrupt is Ctrl-C), `codes` the
+    voice loop's exit code each time it is asked."""
+    import demo.stage as stage
+
+    events = []
+    ready, exits, codes = iter(ready), iter(exits), iter(codes)
+
+    class Scripted:
+        def __init__(self, services):
+            pass
+
+        def start(self):
+            events.append(("start",))
+
+        def wait_ready(self, timeout=None):
+            return next(ready)
+
+        def add(self, service):
+            events.append(("add", service.name))
+
+        def wait(self):
+            dead = next(exits)
+            if dead is KeyboardInterrupt:
+                raise KeyboardInterrupt
+            return dead
+
+        def returncode(self, name):
+            return next(codes)
+
+        def stop(self):
+            events.append(("stop",))
+
+    def wipe(path):
+        events.append(("wipe", path))
+        return wiped
+
+    monkeypatch.setattr(stage, "Supervisor", Scripted)
+    monkeypatch.setattr(stage, "port_answers", lambda port, host="127.0.0.1":
+                        emulator and port == stage.EMULATOR_PORT)
+    monkeypatch.setattr(stage, "_refresh_knowledge", lambda: None)
+    monkeypatch.setattr(stage, "_stop_on_sigterm", lambda: None)
+    monkeypatch.setattr(stage, "_finish_undisturbed", lambda: None)
+    monkeypatch.setattr(stage, "wipe_memory", wipe)
+    return stage.main(["--sim"]), events
+
+
+def test_the_dashboards_restart_starts_the_voice_loop_over_under_sim(monkeypatch):
+    # On the robot scripts/voice_loop.sh restarts the loop on exit 42; with
+    # --sim nothing else would, and Restart used to stop the whole demo.
+    import demo.stage as stage
+
+    code, events = _sim(monkeypatch, ready=[[], [], []],
+                        exits=["voice", KeyboardInterrupt],
+                        codes=[stage.RESTART_EXIT_CODE])
+    assert code == 0
+    assert events == [("start",), ("add", "voice"), ("wipe", stage.SIM_MEMORY_DIR),
+                      ("add", "voice"), ("stop",)]
+
+
+def test_restart_pressed_while_the_voice_loop_starts_is_still_a_restart(monkeypatch):
+    # The dashboard answers before the loop says it listens: a press then
+    # ends the loop with 42 before it was ever "ready".
+    import demo.stage as stage
+
+    code, events = _sim(monkeypatch, ready=[[], ["voice"], []],
+                        exits=[KeyboardInterrupt],
+                        codes=[stage.RESTART_EXIT_CODE])
+    assert code == 0
+    assert events == [("start",), ("add", "voice"), ("wipe", stage.SIM_MEMORY_DIR),
+                      ("add", "voice"), ("stop",)]
+
+
+def test_a_memory_that_cannot_be_moved_aside_while_starting_stops_too(monkeypatch):
+    import demo.stage as stage
+
+    code, events = _sim(monkeypatch, ready=[[], ["voice"]],
+                        codes=[stage.RESTART_EXIT_CODE], wiped=False)
+    assert code == 1
+    assert events.count(("add", "voice")) == 1, "not started again on the old memory"
+
+
+def test_a_voice_loop_that_crashes_keeps_its_memory_and_fails_the_stage(monkeypatch, capsys):
+    code, events = _sim(monkeypatch, ready=[[], []], exits=["voice"], codes=[1])
+    assert code == 1
+    assert not [e for e in events if e[0] == "wipe"]
+    assert "exit 1" in capsys.readouterr().out
+
+
+def test_a_voice_loop_that_crashes_while_starting_is_reported(monkeypatch, capsys):
+    code, events = _sim(monkeypatch, ready=[[], ["voice"]], codes=[1])
+    assert code == 1
+    assert not [e for e in events if e[0] == "wipe"]
+    assert "did not come up: voice" in capsys.readouterr().out
+
+
+def test_a_memory_that_cannot_be_moved_aside_stops_the_restart(monkeypatch):
+    import demo.stage as stage
+
+    code, events = _sim(monkeypatch, ready=[[], []], exits=["voice"],
+                        codes=[stage.RESTART_EXIT_CODE], wiped=False)
+    assert code == 1
+    assert events.count(("add", "voice")) == 1, "not started again on the old memory"
+    assert events[-1] == ("stop",)
+
+
+def test_sim_without_the_emulator_says_how_to_start_it(monkeypatch, capsys):
+    code, events = _sim(monkeypatch, ready=[], emulator=False)
+    assert code == 1
+    assert events == [], "nothing started"
+    assert "mjpython -m reachy_mini.daemon.app.main --sim" in capsys.readouterr().out
+
+
+def test_a_busy_voice_port_is_explained_as_the_dashboards(monkeypatch, capsys):
+    import demo.stage as stage
+
+    web_port = stage.parse_args(["--sim"]).web_port
+    monkeypatch.setattr(stage, "port_answers", lambda port, host="127.0.0.1":
+                        port in (stage.EMULATOR_PORT, web_port))
+    monkeypatch.setattr(stage, "_refresh_knowledge", lambda: pytest.fail("started"))
+    assert stage.main(["--sim"]) == 1
+    out = capsys.readouterr().out
+    assert f"port {web_port} already answers" in out
+    assert "dashboard" in out and "loopback" not in out
+
+
+def test_a_failed_move_says_why_and_leaves_the_memory_where_it_was(monkeypatch, tmp_path, capsys):
+    import demo.stage as stage
+
+    memory = tmp_path / "memory"
+    memory.mkdir()
+
+    def refuse(src, dst):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(stage.os, "rename", refuse)
+    assert stage.wipe_memory(str(memory)) is False
+    assert memory.exists()
+    assert "could not move" in capsys.readouterr().out
+
+
+def test_the_voice_loop_stops_alone_and_gets_its_own_grace():
+    # It saves the conversation on the way out through the embeddings, so it
+    # must be gone before they are signalled — and it is given longer.
+    from demo.stage import STOP_GRACE_S, VOICE_STOP_GRACE_S
+
+    log = []
+
+    class Recording:
+        stdout = iter(())
+
+        def __init__(self, name):
+            self.name = name
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            log.append(("wait", self.name, timeout))
+            return 0
+
+    processes = {"embed": Recording("embed"), "voice": Recording("voice")}
+    supervisor = Supervisor(
+        [Service("embed", ["x"], 9900, "embed_service on")],
+        spawn=lambda service: processes[service.name],
+        send_signal=lambda process, sig: log.append(("signal", process.name, sig)),
+        out=io.StringIO(), colour=False)
+    supervisor.start()
+    supervisor.add(Service("voice", ["y"], 8091, "Speech threshold",
+                           stop_grace=VOICE_STOP_GRACE_S))
+    supervisor.stop()
+    assert [entry[:2] for entry in log] == [("signal", "voice"), ("wait", "voice"),
+                                            ("signal", "embed"), ("wait", "embed")]
+    assert VOICE_STOP_GRACE_S - 1 < log[1][2] <= VOICE_STOP_GRACE_S
+    assert STOP_GRACE_S - 1 < log[3][2] <= STOP_GRACE_S
+
+
+def test_the_voice_loop_gets_the_time_it_needs_to_save_on_the_way_out(monkeypatch):
+    from demo.stage import VOICE_STOP_GRACE_S, voice_loop_service
+
+    assert voice_loop_service(_args("--sim")).stop_grace == VOICE_STOP_GRACE_S >= 20.0
+
+
+def test_a_service_started_again_is_waited_for_again():
+    services = [Service("embed", ["x"], 9900, "embed_service on")]
+    processes = {"embed": _FakeProcess(_running(["embed_service on\n"])),
+                 "voice": _FakeProcess(iter(["Speech threshold\n"]))}  # exits at once
+    supervisor, _sent, _out = _supervisor(services, processes)
+    supervisor.start()
+    supervisor.add(Service("voice", ["y"], 8091, "Speech threshold"))
+    assert supervisor.wait(poll=0.05) == "voice"
+    processes["voice"] = _FakeProcess(_running(["Speech threshold\n"]))
+    supervisor.add(Service("voice", ["y"], 8091, "Speech threshold"))
+    assert supervisor.wait_ready(timeout=2.0) == []
+    waiting = threading.Thread(target=supervisor.wait, kwargs={"poll": 0.05},
+                               daemon=True)
+    waiting.start()
+    waiting.join(0.3)
+    assert waiting.is_alive(), "the run that exited no longer counts: wait blocks"
+
+
+def test_the_last_run_ending_late_does_not_end_the_new_one():
+    # A loop slow to start that exits on Restart while it is waited for: its
+    # output may close after the new run was started.
+    closing = threading.Event()
+
+    def old_output():
+        yield "loading...\n"
+        closing.wait(5)
+
+    processes = {"voice": _FakeProcess(old_output())}
+    supervisor, _sent, _out = _supervisor([], processes)
+    supervisor.add(Service("voice", ["y"], 8091, "Speech threshold"))
+    processes["voice"] = _FakeProcess(_running(["Speech threshold\n"]))
+    supervisor.add(Service("voice", ["y"], 8091, "Speech threshold"))
+    closing.set()                            # the old run's output closes now
+    assert supervisor.wait_ready(timeout=2.0) == []
+    time.sleep(0.2)
+    assert supervisor.wait_ready(timeout=0.1) == [], "the new run is not dead"
+
+
+def test_the_exit_code_is_waited_for_not_read_too_early():
+    # The output closes a moment before the process can be reaped: read
+    # without waiting, a restart's 42 came back as "still running".
+    class Exiting:
+        stdout = iter(())
+
+        def __init__(self):
+            self.waited = []
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            self.waited.append(timeout)
+            return 42
+
+    process = Exiting()
+    supervisor, _sent, _out = _supervisor([], {"voice": process})
+    supervisor.add(Service("voice", ["y"], 8091, "Speech threshold"))
+    assert supervisor.returncode("voice") == 42
+    assert process.waited and process.waited[0] is not None, "waited, but not forever"
