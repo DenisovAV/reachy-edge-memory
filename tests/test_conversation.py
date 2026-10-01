@@ -713,7 +713,7 @@ class _People:
         self._here = list(here)
         self._met = list(met)
 
-    def in_frame(self, frame):
+    def faces_in(self, frame):
         return list(self._here)
 
     def met(self):
@@ -948,7 +948,7 @@ def test_the_person_in_front_of_the_robot_is_not_a_memory_of_them():
     class _People:
         enabled = True
 
-        def in_frame(self, frame):
+        def faces_in(self, frame):
             return [{"name": "Sasha", "box": [0.1, 0.1, 0.3, 0.3]}]
 
         def met(self):
@@ -1101,6 +1101,30 @@ def test_a_stranger_asking_if_they_are_remembered_is_told_the_truth():
     result = brain.requests[1].tool_result["result"]
     assert "not met" in result["note"]
     assert result["people_you_have_met"] == ["Masha"]
+
+
+def test_a_robot_that_cannot_recognise_faces_does_not_call_anyone_a_stranger():
+    # Faces off, or the face read failed: "Do you remember me?" came back "I
+    # don't think we've met" — to someone the robot had met.
+    for who_fn in (lambda: {"note": "You cannot recognise faces right now."}, None):
+        brain = _Brain(_call("remember", "do you remember me?", about="me"),
+                       {"reply": "I can't tell right now.", "token_count": 1})
+        _turn("Do you remember me?", brain, who_fn=who_fn)
+        note = brain.requests[1].tool_result["result"]["note"]
+        assert "not met" not in note
+        assert "cannot recognise faces" in note
+
+
+def test_who_says_so_when_the_faces_cannot_be_read():
+    from demo.conversation import who
+
+    class _Unreadable(_People):
+        def faces_in(self, frame):
+            raise OSError("embed service down")
+
+    result = who(people=_Unreadable(met=["Sasha"]), frame=object())
+    assert result["note"] == "You cannot recognise faces right now."
+    assert result["people_you_have_met"] == ["Sasha"]
 
 
 def test_a_question_that_names_something_is_still_a_search():
