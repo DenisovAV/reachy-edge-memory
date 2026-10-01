@@ -547,6 +547,32 @@ def _finish_undisturbed() -> None:
             pass  # not the main thread
 
 
+def _ensure_face_model(args, services: list[Service]) -> bool:
+    """The face embedder has no LiteRT build to download: the first start
+    builds it from its PyTorch weights (emulator/models.py), before the
+    services, so the first face is not a request that waits two minutes —
+    and only when something will use it: the laptop's embed service, or the
+    robot when ON_ROBOT places faces there (started with --robot, or later
+    from the dashboard's Stream button; never with --sim, which deploys
+    nothing). Built or not, the laptop goes on and
+    says faces are off; the robot cannot do without it (every deploy would
+    stop), so neither does the run. False then."""
+    on_robot = (not args.sim
+                and "faces" in os.environ.get("ON_ROBOT", "").split(","))
+    if not on_robot and not any(service.name == "embed" for service in services):
+        return True
+    from emulator import models
+
+    try:
+        models.fetch("hsface", build=True)
+    except Exception as exc:  # noqa: BLE001 — said, and the demo still talks
+        if on_robot:
+            print(f"faces on the robot need the face embedder: {exc}", flush=True)
+            return False
+        print(f"  faces off: {exc}", flush=True)
+    return True
+
+
 def _refresh_knowledge() -> None:
     """Rebuild the robot's knowledge snapshot when its facts were edited since
     (demo/knowledge.py). In a child process: the embedding model it loads has
@@ -631,6 +657,8 @@ def main(argv=None) -> int:
             return 1
 
     _refresh_knowledge()
+    if not _ensure_face_model(args, services):
+        return 1
     _stop_on_sigterm()
     brain = lan_address()
     script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),

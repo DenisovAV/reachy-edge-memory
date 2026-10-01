@@ -3,10 +3,13 @@
 Each entry is a Hugging Face repo and the file (or files) the demo needs from
 it; `fetch` downloads them into the Hugging Face cache on first use and
 returns the local path. The one exception is the face embedder, which has no
-LiteRT build on the Hub: `scripts/convert_hsface.py` converts it into
-`assets/`.
+LiteRT build on the Hub: it is built from its PyTorch weights with
+`scripts/convert_hsface.py` (about two minutes, once), when `fetch` is asked
+to — by demo/stage.py at start and by this module's main, never by a service
+in the middle of a request.
 
-    uv run python -m emulator.models    # download everything up front
+    uv run python -m emulator.models            # everything up front
+    uv run python -m emulator.models hsface     # just these
 
 Swap a model for a stage by changing its entry or the stage's name below.
 The embedding models and Whisper are loaded by name by their own libraries
@@ -15,22 +18,27 @@ The embedding models and Whisper are loaded by name by their own libraries
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-ASSETS = Path(__file__).resolve().parent.parent / "assets"
+REPO = Path(__file__).resolve().parent.parent
+ASSETS = REPO / "assets"
 
 
 @dataclass(frozen=True)
 class Model:
     """One model: a single file in a Hugging Face repo (`repo` + `file`),
     several files from one (`repo` + `patterns`, fetched as a directory), or
-    a file on this machine (`path`)."""
+    a file on this machine (`path`) — made by `build`, run from the repository
+    root, when it is not there yet."""
 
     repo: str | None = None
     file: str | None = None
     patterns: tuple[str, ...] = ()
     path: Path | None = None
+    build: tuple[str, ...] = ()
     how_to_get: str = ""
 
 
@@ -54,16 +62,14 @@ MODELS: dict[str, Model] = {
     "yunet": Model(repo="opencv/face_detection_yunet",
                    file="face_detection_yunet_2023mar.onnx"),
     "hsface": Model(path=ASSETS / "hsface10k.tflite",
+                    build=("uv", "run", "--with", "torch", "--with", "litert-torch",
+                           "python", "scripts/convert_hsface.py"),
                     how_to_get="convert it with `uv run --with torch --with "
                                "litert-torch python scripts/convert_hsface.py`"),
     # The language model, in-process through litert-lm (emulator/engines.py).
     "gemma-4-e2b": Model(repo="litert-community/gemma-4-E2B-it-litert-lm",
                          file="gemma-4-E2B-it.litertlm"),
 }
-
-# Models the demo runs without: no face embedder, and the robot calls everyone
-# "Person" — it still talks, remembers and recalls.
-OPTIONAL = ("hsface",)
 
 # Which model each stage uses. Swap a stage = change one name here.
 DETECTOR = "yolox-tiny"
@@ -81,18 +87,45 @@ def get(name: str) -> Model:
             f"unknown model {name!r}; known: {sorted(MODELS)}") from None
 
 
-def fetch(model: str | Model) -> Path:
+def _shown(path: Path) -> str:
+    """A model's path as a message says it: from the repository root when it
+    is in it — shorter, and the same on every machine."""
+    try:
+        return str(path.relative_to(REPO))
+    except ValueError:
+        return str(path)
+
+
+def fetch(model: str | Model, *, build: bool = False) -> Path:
     """The local path to a model — a file, or a directory for a `patterns`
     model — downloading it on first use.
 
     The cache is tried first, offline: on the robot, which may have no route
     to the Hub, a model carried over by `scripts/robot_service.sh prepare`
-    loads without a network round trip."""
+    loads without a network round trip. A local model that is missing is
+    built by its `build` command only with build=True; otherwise it fails
+    fast, saying how to get it."""
     spec = get(model) if isinstance(model, str) else model
     if spec.path is not None:
+        # Built only when asked (demo/stage.py at start, `python -m
+        # emulator.models`): never inside a request — a service that finds
+        # the model missing fails fast, as it always did.
+        if not spec.path.exists() and spec.build and build:
+            print(f"  building {spec.path.name}, once (about two minutes)...",
+                  flush=True)
+            try:
+                code = _build(spec.build)
+            except OSError as exc:  # no `uv` on this machine
+                raise FileNotFoundError(
+                    f"{_shown(spec.path)} could not be built ({exc}) — "
+                    f"{spec.how_to_get or 'see README.md'}") from exc
+            if code:
+                raise FileNotFoundError(
+                    f"{_shown(spec.path)} could not be built (exit {code}, its output "
+                    f"is above) — {spec.how_to_get or 'see README.md'}")
         if not spec.path.exists():
             raise FileNotFoundError(
-                f"{spec.path} is missing — {spec.how_to_get or 'see README.md'}")
+                f"{_shown(spec.path)} is missing — {spec.how_to_get or 'see README.md'}")
         return spec.path
     from huggingface_hub import hf_hub_download, snapshot_download
 
@@ -115,6 +148,13 @@ def fetch(model: str | Model) -> Path:
     return Path(download())
 
 
+def _build(command: tuple[str, ...]) -> int:
+    """Run a model's build command from the repository root; its output goes
+    straight to this terminal — a build takes minutes and says why. Its exit
+    code."""
+    return subprocess.run(command, cwd=REPO, check=False).returncode
+
+
 def resolve_llm(name_or_path: str) -> Model:
     """The LLM to load: a catalog name, or a path to any .litertlm file — so
     comparing models downloaded outside the catalog needs a flag, not an edit
@@ -127,19 +167,20 @@ def resolve_llm(name_or_path: str) -> Model:
     return get(name_or_path)
 
 
-def main() -> int:
-    """Download every model in the catalog, and the embedding models the
-    laptop's services load by name (SigLIP 2, bge-small, Whisper)."""
+def main(argv: list[str] | None = None) -> int:
+    """Download every model in the catalog (building the face embedder), and
+    the embedding models the laptop's services load by name (SigLIP 2,
+    bge-small, Whisper) — or only the catalog models named."""
+    names = list(sys.argv[1:] if argv is None else argv)
     failed = []
-    for name, spec in MODELS.items():
+    for name in names or MODELS:
         try:
-            print(f"  {name:<20} {fetch(spec)}", flush=True)
+            print(f"  {name:<20} {fetch(name, build=True)}", flush=True)
         except Exception as exc:  # noqa: BLE001 — report every missing model
-            if name in OPTIONAL:
-                print(f"  {name:<20} not there (optional): {exc}", flush=True)
-                continue
             print(f"  {name:<20} MISSING: {exc}", flush=True)
             failed.append(name)
+    if names:
+        return 1 if failed else 0
     from emulator.frame_memory import SiglipEmbedder
     from emulator.memory import DEFAULT_MODEL, _embedder
     from emulator.whisper_asr import DEFAULT_MODEL as WHISPER, WhisperRecognizer

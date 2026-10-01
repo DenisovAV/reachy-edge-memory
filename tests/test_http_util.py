@@ -29,3 +29,16 @@ def test_result_is_always_pure_printable_ascii():
 
 def test_caps_length():
     assert len(ascii_reason("x" * 500, limit=200)) == 200
+
+
+def test_a_reason_never_names_the_home_directory():
+    # An exception about a file carries its path, and the path the user's
+    # name — to anyone on the network the laptop's services answer.
+    from pathlib import Path
+
+    from demo.http_util import ascii_reason, public
+
+    text = f"FileNotFoundError: {Path.home()}/Work/repo/assets/m.tflite is missing"
+    assert public(text) == "FileNotFoundError: ~/Work/repo/assets/m.tflite is missing"
+    assert str(Path.home()) not in ascii_reason(text)
+    assert "~/Work/repo/assets/m.tflite" in ascii_reason(text)

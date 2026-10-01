@@ -64,18 +64,12 @@ uv run python -m emulator.models      # download every model up front
 
 Download them up front: otherwise the first start fetches about 3 GB while
 `stage` waits for the models to come up, and on a slower connection it gives
-up first.
-
-Faces are optional. The face embedder, HSFace, has PyTorch weights on the Hub
-but no LiteRT build; convert it once (this pulls PyTorch into a temporary
-environment, not the project's):
-
-```bash
-uv run --with torch --with litert-torch python scripts/convert_hsface.py
-```
-
-Without it the robot still talks, remembers and recalls; it just calls
-everyone "Person".
+up first. The face embedder, HSFace, has no ready-made LiteRT build: this step
+builds it from its PyTorch weights (about two minutes, once, with PyTorch in a
+temporary environment, not the project's). Skip the step and the first
+`stage` does it. If it cannot be built, `stage` says so and goes on with faces
+off: the robot still talks, remembers and recalls, it just calls everyone
+"Person".
 
 ## Run it without a robot
 
@@ -145,9 +139,10 @@ ON_ROBOT=detector,faces,asr,tts,embedder uv run python -m demo.stage --robot --r
 
 Any subset of `asr`, `tts`, `detector`, `faces`, `embedder` runs on the robot
 instead of the laptop: `scripts/robot_service.sh` installs the runtime there
-and copies the models from the laptop's Hugging Face cache. `faces` needs the
-face embedder converted first (above); `embedder` has the robot download
-SigLIP 2 and bge itself on first use; `tts` installs espeak-ng with `sudo`.
+and copies the models from the laptop's Hugging Face cache. `faces` builds the
+face embedder on the laptop first if it is not there yet, and the start stops
+if it cannot; `embedder` has the robot download SigLIP 2 and bge itself on
+first use; `tts` installs espeak-ng with `sudo`.
 The start log says where each model runs. The detector on the robot takes
 about 0.6 s a frame on two of its four cores; recognition on the robot is
 moonshine-tiny rather than Whisper, so it is faster there and less accurate.

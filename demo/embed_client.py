@@ -37,8 +37,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from demo.embed_service import (DEFAULT_PORT, FACE_PATH, IMAGE_PATH,
-                                SPEECH_PATH, TEXT_PATH)
+from demo.embed_service import (DEFAULT_PORT, FACE_PATH, HEALTH_PATH,
+                                IMAGE_PATH, SPEECH_PATH, TEXT_PATH)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -160,6 +160,19 @@ class RemoteSiglipEmbedder:
         body = _post(self._base, TEXT_PATH, {"text": text}, self._timeout,
                      self._breaker)
         return np.asarray(body["vector"], dtype=np.float32)
+
+
+def faces_off(host: str, port: int = DEFAULT_PORT, *,
+              timeout: float = DEFAULT_TIMEOUT_S) -> str | None:
+    """Why the embed service has no face models, from its /health — None
+    when it has them, or cannot be asked (then the first face says why)."""
+    try:
+        with urllib.request.urlopen(embed_service_url(host, port) + HEALTH_PATH,
+                                    timeout=timeout) as resp:
+            return json.loads(resp.read()).get("faces_off")
+    except (OSError, ValueError) as exc:
+        logger.warning("embed_service health: %s", exc)
+        return None
 
 
 class RemoteFaceReader:

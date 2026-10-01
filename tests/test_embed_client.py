@@ -299,3 +299,33 @@ def test_text_memory_with_a_remote_embedder_never_imports_fastembed(monkeypatch)
     TextMemory(embedder=RemoteBgeEmbedder("10.0.0.5"))
 
     assert "fastembed" not in sys.modules
+
+
+def test_faces_off_reads_why_from_the_services_health(monkeypatch):
+    from demo import embed_client
+
+    seen = {}
+
+    def health(url, timeout=None):
+        seen["url"] = url
+        return _FakeResponse(json.dumps({"healthy": True, "faces_off": "no model"}).encode())
+
+    monkeypatch.setattr(embed_client.urllib.request, "urlopen", health)
+    assert embed_client.faces_off("mac", 9700) == "no model"
+    assert seen["url"] == "http://mac:9700/health"
+    monkeypatch.setattr(embed_client.urllib.request, "urlopen",
+                        lambda url, timeout=None: _FakeResponse(b'{"healthy": true}'))
+    assert embed_client.faces_off("mac") is None
+
+
+def test_a_service_that_cannot_say_leaves_faces_on(monkeypatch):
+    # The first face request then fails loudly, through the breaker — not here.
+    import urllib.error
+
+    from demo import embed_client
+
+    def unreachable(url, timeout=None):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(embed_client.urllib.request, "urlopen", unreachable)
+    assert embed_client.faces_off("mac") is None

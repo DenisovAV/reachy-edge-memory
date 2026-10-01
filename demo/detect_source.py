@@ -184,10 +184,14 @@ class LocalDetectSource(GpuDetectSource):
         None on a failure, [] for an empty scene."""
         try:
             dets = detections_to_dicts(self._detector.detect(frame))
-            found_faces = self._faces(frame) if self._faces else []
-            with self._lock:
-                self._latest_faces = list(found_faces)
-            return dets
         except Exception as exc:  # noqa: BLE001 — one bad frame must not kill the loop
             LOG.warning("local detect failed: %s: %s", type(exc).__name__, exc)
             return None
+        try:
+            found_faces = self._faces(frame) if self._faces else []
+        except Exception as exc:  # noqa: BLE001 — the objects stand without them
+            LOG.warning("local face boxes failed: %s: %s", type(exc).__name__, exc)
+            found_faces = []
+        with self._lock:
+            self._latest_faces = list(found_faces)
+        return dets
