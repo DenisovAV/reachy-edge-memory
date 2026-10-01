@@ -214,6 +214,43 @@ def test_learning_poses_is_capped():
     assert learned == MAX_LEARNED_SHOTS
 
 
+def test_the_cap_on_learning_poses_is_per_person():
+    # A demo has visitors: the first one standing in bad light used up the
+    # whole run's cap, and nobody after them had a pose learned. The cap is
+    # each person's for the run — coming back does not start it again.
+    from demo.people import MAX_LEARNED_SHOTS
+
+    memory = _Memory(_Match(None, 0.05))
+    people, now = _clocked(memory)
+
+    def at_bad_angles(name, start, turns):
+        memory._match = _Match(name, 0.30)   # the same face, at a worse angle
+        for turn in range(turns):
+            now[0] = start + turn
+            people.observe(FRAME)
+
+    # Sasha's first visit learns only 3: under the cap, so her return must
+    # carry on from there — neither start over nor stop.
+    for name, start, turns in (("Sasha", 0.0, 3),
+                               ("Robin", 1000.0, MAX_LEARNED_SHOTS + 5)):
+        now[0] = start                       # far apart: a new person
+        memory._match = _Match(None, 0.05)   # someone new
+        people.observe(FRAME)
+        people.ask_name()
+        people.answer_name(name)
+        at_bad_angles(name, start, turns)
+    now[0] = 2000.0
+    memory._match = _Match("Sasha", 0.7)     # Sasha comes back, recognised
+    people.observe(FRAME)
+    at_bad_angles("Sasha", 2000.0, MAX_LEARNED_SHOTS + 5)
+
+    learned = {}
+    for name, count in memory.enrolled:
+        learned.setdefault(name, []).append(count)
+    assert sum(learned["Sasha"][1:]) == MAX_LEARNED_SHOTS
+    assert sum(learned["Robin"][1:]) == MAX_LEARNED_SHOTS
+
+
 # — who is in a frame —
 
 def test_in_frame_names_known_faces_and_leaves_strangers_unnamed():
