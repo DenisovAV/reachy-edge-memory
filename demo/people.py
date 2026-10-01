@@ -232,11 +232,11 @@ class People:
     def _still_the_same_person(self, face, score: float) -> Seen:
         """The face does not match, but it never left the camera: it is the
         person already named. Learn this pose, so it matches next time."""
-        if self._learned.get(self._here, 0) < MAX_LEARNED_SHOTS:
+        name = self._here
+        learned = self._learned.get(name, 0)
+        if learned < MAX_LEARNED_SHOTS:
             try:
-                self._learned[self._here] = (self._learned.get(self._here, 0)
-                                             + self._memory.enroll(self._here,
-                                                                   [face["embedding"]]))
+                self._learned[name] = learned + self._memory.enroll(name, [face["embedding"]])
             except Exception as exc:  # noqa: BLE001 — a turn must not hang on this
                 print(f"  [faces] could not learn a pose ({type(exc).__name__}: {exc})")
         self._shots.clear()
