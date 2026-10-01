@@ -58,6 +58,8 @@ VOICE_READY_TIMEOUT_S = 60.0
 # scripts/robot_service.sh gives it on the robot, so it is never killed
 # mid-save.
 VOICE_STOP_GRACE_S = 20.0
+# The Reachy Mini daemon's port — the emulator's too (demo/robot_reachy.py).
+EMULATOR_PORT = 8000
 # demo/run_demo.py's: the voice loop's exit when the dashboard's Restart was
 # pressed (a test keeps the two equal; scripts/voice_loop.sh has it too).
 RESTART_EXIT_CODE = 42
@@ -132,18 +134,44 @@ def voice_loop_service(args) -> Service:
                    args.web_port, "Speech threshold", stop_grace=VOICE_STOP_GRACE_S)
 
 
-def wipe_memory(memory_dir: str) -> None:
+def wipe_memory(memory_dir: str) -> bool:
     """The dashboard's Restart with --sim, as scripts/voice_loop.sh does it on
     the robot: between two runs (the shards are closed by now), the memory is
-    moved aside, not deleted — and only the last one is kept, as -previous."""
+    moved aside, not deleted — and only the last one is kept, as -previous.
+    False, and why, when it could not be moved."""
     memory_dir = memory_dir.rstrip(os.sep)
     previous = memory_dir + "-previous"
     if not os.path.isdir(memory_dir):
         print(f"  memory: nothing at {memory_dir} to clear", flush=True)
-        return
-    shutil.rmtree(previous, ignore_errors=True)
-    os.rename(memory_dir, previous)
+        return True
+    try:
+        if os.path.exists(previous):
+            shutil.rmtree(previous)
+        os.rename(memory_dir, previous)
+    except OSError as exc:
+        print(f"  memory: could not move {memory_dir} aside ({exc})", flush=True)
+        return False
     print(f"  memory: cleared — the old one is kept as {previous}", flush=True)
+    return True
+
+
+def start_voice_loop(supervisor, args) -> bool:
+    """With --sim: start the voice loop and wait until it listens. Restart
+    pressed at any point — even while it is still starting — moves the memory
+    aside and starts it again, as scripts/voice_loop.sh does on the robot.
+    False, said, when it did not come up."""
+    while True:
+        supervisor.add(voice_loop_service(args))
+        late = supervisor.wait_ready(VOICE_READY_TIMEOUT_S)
+        if not late:
+            return True
+        if (late == ["voice"]
+                and supervisor.returncode("voice") == RESTART_EXIT_CODE):
+            if not wipe_memory(SIM_MEMORY_DIR):
+                return False
+            continue
+        print(f"  did not come up: {', '.join(late)} — stopping the rest")
+        return False
 
 
 def port_answers(port: int, host: str = "127.0.0.1",
@@ -580,11 +608,17 @@ def main(argv=None) -> int:
     args = parse_args(argv)
     services = build_services(args)
 
+    if args.sim and not port_answers(EMULATOR_PORT, args.robot_host):
+        print(f"no robot answers at {args.robot_host}:{EMULATOR_PORT} — start the "
+              "emulator first:\n  mjpython -m reachy_mini.daemon.app.main --sim --no-media")
+        return 1
     for service in services + ([voice_loop_service(args)] if args.sim else []):
         if port_answers(service.port):
+            why = ("the voice loop's dashboard could not bind it"
+                   if service.name == "voice" else
+                   f"{service.name} would bind 0.0.0.0 and lose the loopback to it")
             print(f"port {service.port} already answers — something else is "
-                  f"running there ({service.name} would bind 0.0.0.0 and lose "
-                  f"the loopback to it). Stop it, or pass a different port.")
+                  f"running there ({why}). Stop it, or pass a different port.")
             return 1
 
     _refresh_knowledge()
@@ -606,13 +640,9 @@ def main(argv=None) -> int:
         if late:
             print(f"  did not come up: {', '.join(late)} — stopping the rest")
             return 1
-        if args.sim:
-            # The models answer: now the voice loop, which needs them.
-            supervisor.add(voice_loop_service(args))
-            late = supervisor.wait_ready(VOICE_READY_TIMEOUT_S)
-            if late:
-                print(f"  did not come up: {', '.join(late)} — stopping the rest")
-                return 1
+        # The models answer: now the voice loop, which needs them.
+        if args.sim and not start_voice_loop(supervisor, args):
+            return 1
 
         dashboard_host = "127.0.0.1" if args.sim else brain
         print(f"\n  ready. dashboard http://{dashboard_host}:{args.web_port}"
@@ -637,18 +667,19 @@ def main(argv=None) -> int:
 
         while True:
             dead = supervisor.wait()
-            if (args.sim and dead == "voice"
-                    and supervisor.returncode("voice") == RESTART_EXIT_CODE):
-                # Restart from the dashboard: on the robot scripts/voice_loop.sh
-                # does this; here it is the launcher's job.
-                wipe_memory(SIM_MEMORY_DIR)
-                supervisor.add(voice_loop_service(args))
-                late = supervisor.wait_ready(VOICE_READY_TIMEOUT_S)
-                if late:
-                    print(f"  did not come up: {', '.join(late)} — stopping the rest")
-                    return 1
-                print("  started over — just talk", flush=True)
-                continue
+            if args.sim and dead == "voice":
+                code = supervisor.returncode("voice")
+                if code == RESTART_EXIT_CODE:
+                    # Restart from the dashboard: on the robot
+                    # scripts/voice_loop.sh does this; here it is the
+                    # launcher's job.
+                    if not (wipe_memory(SIM_MEMORY_DIR)
+                            and start_voice_loop(supervisor, args)):
+                        return 1
+                    print("  started over — just talk", flush=True)
+                    continue
+                print(f"\n  the voice loop ended (exit {code}) — stopping the rest")
+                return 0 if code == 0 else 1
             if dead:
                 print(f"\n  {dead} exited — stopping the rest")
             break
