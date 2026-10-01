@@ -72,6 +72,44 @@ def test_every_service_accepts_the_command_line_it_is_started_with():
             pass
 
 
+def test_sim_runs_the_voice_loop_here_and_no_second_dashboard():
+    # Without a robot the voice loop runs on this machine and serves the
+    # dashboard itself, on this machine's camera: a standalone one would want
+    # the same port. Nobody has to say --skip anything.
+    from demo import run_demo
+    from demo.stage import voice_loop_service
+
+    args = _args("--sim", "--port", "9501", "--web-port", "8081", "--video", "1")
+    assert [s.name for s in build_services(args)] == ["embed", "serve", "detect"]
+    voice = voice_loop_service(args)
+    parsed = run_demo.parse_args(voice.argv[4:])
+    assert (parsed.brain, parsed.robot_host) == ("127.0.0.1", "127.0.0.1")
+    assert (parsed.port, parsed.web_port, voice.port) == (9501, 8081, 8081)
+    assert (parsed.video, parsed.audio) == ("1", "default")
+
+
+def test_the_robot_is_the_emulator_with_sim_and_the_reachy_otherwise():
+    assert _args("--sim").robot_host == "127.0.0.1"
+    assert _args().robot_host == "reachy-mini.local"
+    assert _args("--sim", "--robot-host", "10.0.0.5").robot_host == "10.0.0.5"
+    with pytest.raises(SystemExit):
+        _args("--sim", "--robot")
+
+
+def test_what_was_added_last_stops_first_and_alone():
+    # The voice loop saves the rest of the conversation on its way out, and
+    # needs the embeddings it was started after still answering.
+    services = [Service("embed", ["x"], 9900, "embed_service on")]
+    processes = {"embed": _FakeProcess(_running(["embed_service on\n"])),
+                 "voice": _FakeProcess(_running(["Speech threshold\n"]))}
+    supervisor, sent, _out = _supervisor(services, processes)
+    supervisor.start()
+    supervisor.add(Service("voice", ["y"], 8091, "Speech threshold"))
+    assert supervisor.wait_ready(timeout=2.0) == []
+    supervisor.stop()
+    assert [process for process, _sig in sent] == [processes["voice"], processes["embed"]]
+
+
 def test_skip_leaves_a_service_out():
     names = [s.name for s in build_services(_args("--skip", "dash",
                                                   "--skip", "detect"))]

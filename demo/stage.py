@@ -48,7 +48,10 @@ READY_TIMEOUT_S = 240.0
 STOP_GRACE_S = 5.0
 
 _COLOURS = {"embed": "\033[35m", "serve": "\033[36m", "detect": "\033[33m",
-            "dash": "\033[32m"}
+            "dash": "\033[32m", "voice": "\033[34m"}
+# How long the voice loop may take to say it listens, once the models are up:
+# the camera warms up first (demo/run_demo.py's run_voice, up to ~6 s).
+VOICE_READY_TIMEOUT_S = 60.0
 _RESET = "\033[0m"
 
 
@@ -85,13 +88,31 @@ def build_services(args) -> list[Service]:
                            "--port", str(args.gpu_detect_port),
                            "--host", "0.0.0.0"],
                 args.gpu_detect_port, "gpu_detect on"),
-        Service("dash", [python, "-u", "-m", "demo.display.web",
-                         "--port", str(args.web_port),
-                         "--robot-host", args.robot_host],
-                args.web_port, "dashboard on"),
     ]
+    if not args.sim:
+        # With --sim the voice loop runs here and serves the dashboard itself,
+        # on the laptop's own camera; a second one would want the same port.
+        services.append(
+            Service("dash", [python, "-u", "-m", "demo.display.web",
+                             "--port", str(args.web_port),
+                             "--robot-host", args.robot_host],
+                    args.web_port, "dashboard on"))
     skip = set(args.skip or ())
     return [s for s in services if s.name not in skip]
+
+
+def voice_loop_service(args) -> Service:
+    """The voice loop on this machine, for --sim: the laptop's camera,
+    microphone and speaker, the models just started here, the emulator's
+    daemon at --robot-host — and the dashboard, which it serves itself."""
+    return Service("voice", [sys.executable, "-u", "-m", "demo.run_demo",
+                             "--brain", "127.0.0.1", "--port", str(args.port),
+                             "--gpu-detect-port", str(args.gpu_detect_port),
+                             "--embed-port", str(args.embed_port),
+                             "--web-port", str(args.web_port),
+                             "--robot-host", args.robot_host,
+                             "--video", args.video, "--audio", args.audio],
+                   args.web_port, "Speech threshold")
 
 
 def port_answers(port: int, host: str = "127.0.0.1",
@@ -146,16 +167,27 @@ class Supervisor:
         self._ready: dict[str, threading.Event] = {}
         self._exited = threading.Event()
         self._dead: list[str] = []
+        self._added: set[str] = set()
 
     def start(self) -> None:
         """Start every service at once — they spend their first seconds
         loading models, and doing that in parallel is the whole point."""
         for service in self._services:
-            process = self._spawn(service)
-            self._processes[service.name] = process
-            self._ready[service.name] = threading.Event()
-            threading.Thread(target=self._pump, args=(service, process),
-                             daemon=True).start()
+            self._start(service)
+
+    def add(self, service: Service) -> None:
+        """Start one more, once the others are up (the voice loop, which
+        needs the models answering). Stopped before them on the way out."""
+        self._services.append(service)
+        self._added.add(service.name)
+        self._start(service)
+
+    def _start(self, service: Service) -> None:
+        process = self._spawn(service)
+        self._processes[service.name] = process
+        self._ready[service.name] = threading.Event()
+        threading.Thread(target=self._pump, args=(service, process),
+                         daemon=True).start()
 
     def wait_ready(self, timeout: float = READY_TIMEOUT_S) -> list[str]:
         """Block until every service has announced itself; returns the names
@@ -181,7 +213,16 @@ class Supervisor:
         return self._dead[0] if self._dead else None
 
     def stop(self) -> None:
-        for name, process in self._processes.items():
+        # Those added after the others stop first, on their own: the voice
+        # loop saves what is left of the conversation on the way out, and
+        # that needs the embeddings it was started after still answering.
+        names = list(self._processes)
+        self._stop([name for name in names if name in self._added])
+        self._stop([name for name in names if name not in self._added])
+
+    def _stop(self, names: list[str]) -> None:
+        for name in names:
+            process = self._processes[name]
             if process.poll() is not None:
                 continue
             try:
@@ -189,7 +230,8 @@ class Supervisor:
             except (ProcessLookupError, PermissionError) as exc:
                 self._write(name, f"could not stop: {type(exc).__name__}: {exc}")
         deadline = time.monotonic() + STOP_GRACE_S
-        for name, process in self._processes.items():
+        for name in names:
+            process = self._processes[name]
             left = max(0.0, deadline - time.monotonic())
             try:
                 process.wait(timeout=left)
@@ -454,12 +496,23 @@ def parse_args(argv=None):
                    help="demo/gpu_detect.py — the object detector")
     p.add_argument("--web-port", type=int, default=DEFAULT_DASHBOARD_PORT,
                    help="the dashboard, and where the robot pushes its events")
-    p.add_argument("--robot-host", default="reachy-mini.local",
-                   help="the robot, for the dashboard's live camera view")
-    p.add_argument("--robot", action="store_true",
-                   help="also bring the robot up (scripts/robot_service.sh: "
-                        "camera and microphone, then the voice loop) and stop "
-                        "it again on the way out")
+    p.add_argument("--robot-host", default=None,
+                   help="the robot: reachy-mini.local by default, the "
+                        "emulator on this machine (127.0.0.1) with --sim")
+    where = p.add_mutually_exclusive_group()
+    where.add_argument("--robot", action="store_true",
+                       help="also bring the robot up (scripts/robot_service.sh: "
+                            "camera and microphone, then the voice loop) and "
+                            "stop it again on the way out")
+    where.add_argument("--sim", action="store_true",
+                       help="no robot: run the voice loop here too, with this "
+                            "machine's camera, microphone and speaker, against "
+                            "the Reachy Mini emulator — it serves the dashboard")
+    p.add_argument("--video", default="default",
+                   help="with --sim: the camera, \"default\" or an ffmpeg "
+                        "avfoundation index (passed to demo/run_demo.py)")
+    p.add_argument("--audio", default="default",
+                   help="with --sim: the microphone, the same way")
     p.add_argument("--llm", default=None, help="passed to demo/serve.py")
     p.add_argument("--asr", choices=("whisper", "moonshine"), default="whisper",
                    help="passed to demo/serve.py")
@@ -470,14 +523,17 @@ def parse_args(argv=None):
     p.add_argument("--skip", action="append", metavar="NAME",
                    choices=("embed", "serve", "detect", "dash"),
                    help="do not start this service (repeatable)")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if args.robot_host is None:
+        args.robot_host = "127.0.0.1" if args.sim else "reachy-mini.local"
+    return args
 
 
 def main(argv=None) -> int:
     args = parse_args(argv)
     services = build_services(args)
 
-    for service in services:
+    for service in services + ([voice_loop_service(args)] if args.sim else []):
         if port_answers(service.port):
             print(f"port {service.port} already answers — something else is "
                   f"running there ({service.name} would bind 0.0.0.0 and lose "
@@ -503,11 +559,21 @@ def main(argv=None) -> int:
         if late:
             print(f"  did not come up: {', '.join(late)} — stopping the rest")
             return 1
+        if args.sim:
+            # The models answer: now the voice loop, which needs them.
+            supervisor.add(voice_loop_service(args))
+            late = supervisor.wait_ready(VOICE_READY_TIMEOUT_S)
+            if late:
+                print(f"  did not come up: {', '.join(late)} — stopping the rest")
+                return 1
 
-        print(f"\n  ready. dashboard http://{brain}:{args.web_port}"
+        dashboard_host = "127.0.0.1" if args.sim else brain
+        print(f"\n  ready. dashboard http://{dashboard_host}:{args.web_port}"
               f"   ·   brain {brain}:{args.port}")
         streaming = False
-        if args.robot:
+        if args.sim:
+            print("  the voice loop runs here, against the emulator — just talk")
+        elif args.robot:
             robot_up = True
             streaming = (_robot(script, "start", robot)
                          and _robot(script, "voice-start", robot))
