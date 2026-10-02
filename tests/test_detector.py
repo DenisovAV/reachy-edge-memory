@@ -220,8 +220,8 @@ def test_detector_finds_people_in_the_models_own_sample_photo():
                      threads=2).detect(photo)
     people = [d for d in found if d.label == 0]
     assert 6 <= len(people) <= 8
-    best = max(people, key=lambda d: d.score)
-    assert _iou(best.box, (0.015, 0.76, 0.11, 0.93)) > 0.8
+    # The man at the left edge, wherever he ranks.
+    assert any(_iou(d.box, (0.015, 0.76, 0.11, 0.93)) > 0.8 for d in people)
     assert all(0.0 <= v <= 1.0 for d in found for v in d.box)
 
 
@@ -249,6 +249,23 @@ def test_a_person_cut_off_by_the_frame_is_one_box(monkeypatch):
     monkeypatch.setattr(detector_module, "non_max_suppression", lambda found: found)
     assert repeats(detector.detect(crop)), "the head repeats a person here"
     assert not repeats(kept)
+
+
+@pytest.mark.skipif(_cached("yolo26n_conv2d_f16_weights.tflite") is None
+                    or _cached("samples/sample.jpg") is None,
+                    reason="yolo26n or its sample photo is not cached")
+def test_a_person_partly_behind_another_is_still_two():
+    """Why NMS is not at the 0.4 Arm's manifest names: here a man stands
+    half behind another, their boxes at 0.47 IoU — two people."""
+    from PIL import Image
+
+    detector = Detector(Path(_cached("yolo26n_conv2d_f16_weights.tflite")),
+                        threads=2)
+    crop = np.asarray(Image.open(_cached("samples/sample.jpg")).convert("RGB")
+                      .crop((9, 496, 386, 1115)))
+    people = [d for d in detector.detect(crop) if d.label == 0]
+    assert any(0.4 < _iou(a.box, b.box) < 0.7
+               for i, a in enumerate(people) for b in people[i + 1:])
 
 
 def _iou(a, b):

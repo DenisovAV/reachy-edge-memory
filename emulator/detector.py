@@ -15,8 +15,11 @@ manifest and checked against the tensors on its sample photo:
   corners (x1, y1, x2, y2) in input pixels, the score, the COCO class.
   YOLO26's head is meant to need no NMS, but this export does leave repeats:
   a person cut off by the bottom of the frame — how the robot sees whoever it
-  talks to — came back twice, 0.74 and 0.31 at 0.97 IoU. Arm's manifest asks
-  for NMS at 0.4, and it is applied here.
+  talks to — came back twice, 0.74 and 0.31 at 0.97 IoU. So NMS is applied
+  here, at 0.7 IoU (Ultralytics' own default), not the 0.4 Arm's manifest
+  names: over 99 frames every repeat overlapped its keeper at 0.81 or more,
+  and two different people, one partly behind the other, at 0.47 and 0.52 —
+  0.4 merged them.
 
 That head lowers to INT64 select ops the LiteRT GPU delegate rejects (on the
 Mac's Metal as on the Pi 5's VideoCore), so the detector runs on CPU cores
@@ -34,7 +37,7 @@ import numpy as np
 
 PAD_VALUE = 114.0 / 255.0
 ROW = 6   # x1, y1, x2, y2, score, class
-NMS_IOU = 0.4   # Arm's manifest for this export
+NMS_IOU = 0.7   # see the module docstring
 
 
 @dataclasses.dataclass(frozen=True)
