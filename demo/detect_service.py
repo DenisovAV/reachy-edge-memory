@@ -59,7 +59,7 @@ class Faces:
 
             self._reader = FaceReader(identities=False)
         except Exception as exc:  # noqa: BLE001 — faces are an extra here
-            LOG.warning("gpu_detect: no face detection (%s: %s)",
+            LOG.warning("detect_service: no face detection (%s: %s)",
                         type(exc).__name__, exc)
 
     def detect(self, jpeg: bytes) -> list[dict]:
@@ -148,8 +148,8 @@ def main(argv=None) -> int:
     args = parse_args(argv)
     detector = Objects(args.model or str(models.fetch(models.DETECTOR)))
     server = HTTPServer((args.host, args.port), make_handler(detector, Faces()))
-    print(f"gpu_detect on {args.host}:{args.port}: {models.DETECTOR} on the "
-          "CPU", flush=True)
+    print(f"detect_service on {args.host}:{args.port}: {models.DETECTOR} "
+          "on the CPU", flush=True)
     server.serve_forever()
     return 0
 

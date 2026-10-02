@@ -111,7 +111,7 @@ def test_video_source_defaults_to_mac_camera_when_no_camera_flag(monkeypatch):
 
 # --- --camera robot: the video source is a configuration choice, not a
 # code fork — MacPlatform.video_source() picks the implementation, the
-# voice loop/GpuDetectSource/dashboard never know the difference. ---
+# voice loop/RemoteDetectSource/dashboard never know the difference. ---
 
 class FakeRobotCameraSource:
     """Records the URL it was built with; no thread, no network."""

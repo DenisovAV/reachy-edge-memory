@@ -137,7 +137,7 @@ class Embedders:
     def face_boxes(self):
         """Where the faces are, without who: the robot's own detect loop
         (`--on-robot detector`) keeps its head on a face with these. YuNet
-        alone, as demo/gpu_detect.py reads them — faces off must not take
+        alone, as demo/detect_service.py reads them — faces off must not take
         the head tracking, and the objects found with it, along."""
         if self._faces is not None:
             return self._faces

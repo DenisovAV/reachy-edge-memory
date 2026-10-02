@@ -2,7 +2,7 @@
 
 The presentation half of the former WebUI: serves the MJPEG camera feed, SSE
 events, and dashboard.html. Knows nothing about where detections come from —
-`on_detections` is just a listener subscribed to GpuDetectSource, or a
+`on_detections` is just a listener subscribed to RemoteDetectSource, or a
 `/push` POST from a `RemoteDisplayClient` running elsewhere (see below).
 Boxes are drawn by the BROWSER on a canvas over the video — no CPU here spent
 on rendering. A single viewer-presenter.

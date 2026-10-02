@@ -157,7 +157,7 @@ def test_bge_embedder_failure_raises(monkeypatch):
 # shape of fix there.
 
 def test_default_timeout_is_short(monkeypatch):
-    # Matches GpuDetectSource's own budget for the same shape of call (JPEG
+    # Matches RemoteDetectSource's own budget for the same shape of call (JPEG
     # upload + inference + small JSON reply) — see the module's own comment.
     from demo.embed_client import DEFAULT_TIMEOUT_S
 

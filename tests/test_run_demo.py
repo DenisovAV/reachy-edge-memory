@@ -122,7 +122,7 @@ def test_drive_robot_stream_forwards_reply_chunks():
 
 
 # --- _handle_stream: the voice loop always goes through a DisplaySink ---
-# (the source from GpuDetectSource always returns a detections list — the
+# (the source from RemoteDetectSource always returns a detections list — the
 # "webui vs none" branch was removed from run_voice; _handle_stream accepts
 # a DisplaySink of any implementation — here a spy stub, like
 # NullSink/WebDashboard.)
@@ -653,7 +653,7 @@ def test_robot_dispatcher_logs_failure_through_the_shared_guard():
 
 
 # --- AsyncSceneWriter: SceneChangeWriter.observe() used to run
-# INLINE on GpuDetectSource's detect thread, so a slow FrameMemory.remember()
+# INLINE on RemoteDetectSource's detect thread, so a slow FrameMemory.remember()
 # (RemoteSiglipEmbedder's network embed) froze detection itself — no new
 # frame/detections, and display.on_detections (the other listener) stopped
 # firing too. Mirrors RobotDispatcher's own tests above.
@@ -723,7 +723,7 @@ def test_async_scene_writer_drops_stale_pending_for_the_latest_call():
 
 def test_async_scene_writer_survives_a_failing_observe(capsys):
     # A bad write must not kill the worker thread — the next dispatch still
-    # has to run (mirrors GpuDetectSource._cycle's own listener guard).
+    # has to run (mirrors RemoteDetectSource._cycle's own listener guard).
     from demo.run_demo import AsyncSceneWriter
 
     class FlakyWriter:

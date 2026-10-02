@@ -8,7 +8,7 @@ over HTTP: the language model always, the others unless `--on-robot` moves
 them here (demo/placement.py):
 
 - demo/serve.py — speech recognition, the language model, the voice;
-- demo/gpu_detect.py — the object and face detector;
+- demo/detect_service.py — the object and face detector;
 - demo/embed_service.py — the embeddings (SigLIP 2, bge, face identities).
 
 The camera, mic and speaker are the robot's, reached over loopback HTTP
@@ -42,7 +42,7 @@ from demo.contract import (CHAT_PATH, NAME_PATH, SAY_PATH, TRANSCRIBE_PATH,
 from demo.conversation import (DEFAULT_CONTEXT_BUDGET, TURNED,
                                ConversationWindow, LookFailed, chat_turn,
                                day_frames, lookup, recall, recall_seen, who)
-from demo.detect_source import (GpuDetectSource, LocalDetectSource,
+from demo.detect_source import (RemoteDetectSource, LocalDetectSource,
                                 frame_to_jpeg)
 from demo.detections import gaze_from_dicts
 from demo.display import DEFAULT_DASHBOARD_PORT, build_display
@@ -219,10 +219,10 @@ class RobotDispatcher:
 
 class AsyncSceneWriter:
     """Runs SceneChangeWriter.observe() on its own worker thread so a slow
-    memory write never stalls GpuDetectSource's detect thread.
+    memory write never stalls RemoteDetectSource's detect thread.
 
-    GpuDetectSource._cycle (demo/detect_source.py) calls every listener
-    INLINE, on the same thread that POSTs frames to gpu_detect and updates
+    RemoteDetectSource._cycle (demo/detect_source.py) calls every listener
+    INLINE, on the same thread that POSTs frames to detect_service and updates
     `source.latest()`: `SceneChangeWriter.observe` used to be registered
     directly as a listener, so the moment it called `FrameMemory.remember`
     (emulator/frame_memory.py) — which embeds the frame via
@@ -231,7 +231,7 @@ class AsyncSceneWriter:
     frame or detections stored, `source.latest()` stuck returning a stale
     pair, and `display.on_detections` (the other listener) stopped firing
     too, freezing the audience's live boxes with nothing logged (healthy()
-    only counts failed gpu_detect POSTs, not a slow listener). Before this
+    only counts failed detect_service POSTs, not a slow listener). Before this
     move remember() was a ~36 ms in-process SigLIP call, cheap enough to run
     inline; RemoteSiglipEmbedder made it a network round trip, which isn't.
 
@@ -280,7 +280,7 @@ class AsyncSceneWriter:
 
     def close(self, timeout: float = 6.0) -> None:
         # Longer than demo/embed_client.py's DEFAULT_TIMEOUT_S (5.0)
-        # for the same reason as GpuDetectSource.stop(): an in-flight
+        # for the same reason as RemoteDetectSource.stop(): an in-flight
         # remember() should get the chance to actually finish (or time out on
         # its own) rather than being cut off mid-call by a shorter join.
         self._stop.set()
@@ -550,7 +550,7 @@ class FaceTracker:
     A turn aims once, when it starts (_talk), which leaves the head frozen at
     the last target while the person keeps moving. This runs on the detect
     loop instead: the frames already go to the Mac, and now face boxes come
-    back beside the object boxes (demo/gpu_detect.py's Faces), so the head
+    back beside the object boxes (demo/detect_service.py's Faces), so the head
     follows at the detect rate with no extra round trip.
 
     Throttled three ways — no more often than `min_interval`, not for a move
@@ -629,7 +629,7 @@ class FaceTracker:
 # How long a head turn takes to reach the picture the voice loop reads.
 # Measured on the robot: after /move/goto, the camera's own frame
 # settled 0.73-1.64 s later; the detect loop then needs one more cycle (4 fps)
-# before GpuDetectSource.latest() holds it.
+# before RemoteDetectSource.latest() holds it.
 LOOK_SETTLE_S = 1.6
 
 
@@ -922,7 +922,7 @@ def build_detect_source(args, camera, detect_url: str):
     that never ran there.
     """
     if not placement.on_robot(args, "detector"):
-        return GpuDetectSource(camera, detect_url)
+        return RemoteDetectSource(camera, detect_url)
 
     from emulator import models
     from emulator.detector import Detector
@@ -935,7 +935,7 @@ def build_detect_source(args, camera, detect_url: str):
                                 f"{type(exc).__name__}: {exc}") from exc
 
     # The face boxes found on the same cycle, as the laptop's detect service
-    # sends them along with its detections (demo/gpu_detect.py's Faces): the
+    # sends them along with its detections (demo/detect_service.py's Faces): the
     # head tracker is fed four times a second, not once a turn. From the face
     # models wherever they are placed — here, or on the laptop.
     faces = None
@@ -1290,7 +1290,7 @@ def run_voice(args, endpoint) -> int:
         camera = platform.video_source()
         mic = platform.mic_source()
         robot = platform.robot()
-        detect_url = f"http://{_brain(args)}:{args.gpu_detect_port}/detect"
+        detect_url = f"http://{_brain(args)}:{args.detect_port}/detect"
         source = build_detect_source(args, camera, detect_url)
         display = build_display(
             args.display, camera=camera, host="127.0.0.1", port=args.web_port,
@@ -1383,7 +1383,7 @@ def run_voice(args, endpoint) -> int:
                         "embedder": "SigLIP + bge"},
                 addresses={"asr": f"{args.brain}:{args.port}",
                            "tts": f"{args.brain}:{args.port}",
-                           "detector": f"{args.brain}:{args.gpu_detect_port}",
+                           "detector": f"{args.brain}:{args.detect_port}",
                            "faces": embed_at, "embedder": embed_at},
                 off=() if people.enabled else ("faces",)):
             print(line)
@@ -1406,7 +1406,7 @@ def run_voice(args, endpoint) -> int:
             print(f"  ready. Speech threshold: {threshold:.3f}. "
                   f"Just talk — Ctrl-C to quit.\n")
         # Health of the vision path, surfaced once per transition below. The
-        # signals (GpuDetectSource.healthy(), CameraStream.alive) exist for
+        # signals (RemoteDetectSource.healthy(), CameraStream.alive) exist for
         # exactly this — without reading them a sustained detector/camera outage is
         # invisible beyond the detect thread's per-cycle warnings.
         detect_healthy = True
@@ -1667,7 +1667,7 @@ def parse_args(argv=None):
 
     p = argparse.ArgumentParser(description="The robot's voice loop")
     p.add_argument("--brain", default="127.0.0.1",
-                   help="the laptop running serve.py, gpu_detect.py and "
+                   help="the laptop running serve.py, detect_service.py and "
                         "embed_service.py")
     p.add_argument("--port", type=int, default=9500,
                    help="demo/serve.py's port on --brain")
@@ -1695,8 +1695,8 @@ def parse_args(argv=None):
                    help="dashboard port: bound locally for --display web, or "
                         "the port pushed to on --dashboard-host for "
                         "--display remote")
-    p.add_argument("--gpu-detect-port", type=int, default=9600,
-                   help="demo/gpu_detect.py's port on --brain")
+    p.add_argument("--detect-port", type=int, default=9600,
+                   help="demo/detect_service.py's port on --brain")
     p.add_argument("--embed-port", type=int, default=EMBED_SERVICE_PORT,
                    help="demo/embed_service.py's port on --brain")
     p.add_argument("--display", choices=["web", "none", "remote"], default="web",

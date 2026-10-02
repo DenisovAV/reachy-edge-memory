@@ -6,7 +6,7 @@ Same fake-HTTP-layer approach as tests/test_detect_source.py: monkeypatch
 needs the robot. Most tests use `_idle_source()` (the real background thread
 is never started — a test-only constructor seam, see robot_camera.py) and
 drive `_cycle()` by hand for an exact, deterministic fetch count, mirroring
-how tests/test_detect_source.py drives GpuDetectSource._cycle() directly
+how tests/test_detect_source.py drives RemoteDetectSource._cycle() directly
 rather than racing a real thread. Two tests exercise the real background
 thread (short poll_interval + the same `_wait_for` poll helper as
 tests/test_platform_mac.py) to prove the threading/close() contract itself.

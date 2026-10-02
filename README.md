@@ -18,7 +18,7 @@ Qdrant Edge"](https://www.youtube.com/watch?v=PxGlBlqTxJI&t=3709s).
  ┌──────────────────────────────────────┐          ┌──────────────────────────────────┐
  │ voice loop       demo/run_demo.py    │  HTTP    │ demo/serve.py                    │
  │  listen → look → remember → answer   │ ───────▶ │  Whisper · Gemma 4 E2B · Inflect │
- │                                      │          │ demo/gpu_detect.py               │
+ │                                      │          │ demo/detect_service.py           │
  │ Qdrant Edge, three shards            │          │  YOLO26n · YuNet                 │
  │  memory/    what was said and seen   │          │ demo/embed_service.py            │
  │  people/    who it has met           │          │  SigLIP 2 · bge-small · HSFace   │
@@ -212,7 +212,7 @@ No robot, camera or model download needed.
 | `demo/run_demo.py` | the voice loop: listen, look, remember, answer |
 | `demo/conversation.py`, `demo/chat_session.py` | the conversation, the tools, and how each memory question is answered |
 | `demo/people.py`, `demo/knowledge.py` | who it has met; what it was taught |
-| `demo/serve.py`, `demo/gpu_detect.py`, `demo/embed_service.py` | the laptop's model services |
+| `demo/serve.py`, `demo/detect_service.py`, `demo/embed_service.py` | the laptop's model services |
 | `demo/stage.py`, `scripts/robot_service.sh` | starting everything, on the laptop and on the robot |
 | `demo/camera_service.py` | the robot's camera and microphone over HTTP |
 | `demo/display/` | the dashboard |

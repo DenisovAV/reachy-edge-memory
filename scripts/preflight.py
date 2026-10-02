@@ -201,8 +201,8 @@ def main(argv=None) -> int:
     print("\n--- services on this laptop ---")
     check_service("models (serve.py)", "127.0.0.1", args.serve_port,
                   "uv run python -m demo.serve")
-    check_service("detector (gpu_detect)", "127.0.0.1", args.detect_port,
-                  "uv run python -m demo.gpu_detect")
+    check_service("detector (detect_service)", "127.0.0.1", args.detect_port,
+                  "uv run python -m demo.detect_service")
 
     print("\n--- the robot ---")
     if check_robot(args.robot_host):

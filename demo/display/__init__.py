@@ -22,7 +22,7 @@ class DisplaySink(Protocol):
     """Presentation interface: the voice loop sends events here."""
 
     def on_detections(self, detections: list[dict]) -> None:
-        """Listener for GpuDetectSource — fresh boxes on every detect cycle."""
+        """Listener for RemoteDetectSource: fresh boxes every detect cycle."""
         ...
 
     def on_look(self, jpeg: bytes) -> None:

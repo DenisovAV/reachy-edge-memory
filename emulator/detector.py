@@ -31,7 +31,7 @@ GATHER_ND — is not supported by the LiteRT GPU delegate, and CompiledModel
 fails to build for the GPU (on the Mac's Metal as on the Pi 5's VideoCore),
 so the detector runs on CPU cores wherever a frame becomes boxes: this
 `Detector`, on the robot (`--on-robot detector`) and in the laptop's service
-(demo/gpu_detect.py), where a frame takes about 20 ms.
+(demo/detect_service.py), where a frame takes about 20 ms.
 """
 
 from __future__ import annotations

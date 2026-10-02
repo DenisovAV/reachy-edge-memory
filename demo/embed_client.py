@@ -11,7 +11,7 @@ point: a memory built on the robot must be constructible without the models
 it used to compute its own vectors with (see tests/test_embed_client.py's
 import-isolation test).
 
-Deliberately NOT resilient the way demo/detect_source.py's GpuDetectSource or
+Deliberately NOT resilient the way demo/detect_source.py's RemoteDetectSource or
 demo/platform/robot_camera.py's RobotCameraSource are: those degrade
 gracefully because a dropped video frame just costs one detection or one
 displayed frame. A memory write that silently no-ops costs the demo its
@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 # A frame vector call is dominated by SigLIP inference on the Mac (~36ms,
 # measured — see emulator/frame_memory.py) plus a JPEG upload; a stalled peer
 # (Mac mid-model-load, a TCP blackhole on conference WiFi) should look like a
-# failure quickly, not 15s later. Matches GpuDetectSource's own budget for
+# failure quickly, not 15s later. Matches RemoteDetectSource's own budget for
 # the same shape of call (demo/detect_source.py's `_post_detect`,
 # urlopen(timeout=5)) — a JPEG upload followed by inference and a small JSON
 # reply. A turn's memory search and the scene writer's stores call into this

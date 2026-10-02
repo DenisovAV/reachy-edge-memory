@@ -1,6 +1,6 @@
 """Detection source: camera frame -> the laptop's detect service -> boxes.
 
-The screenless core: sends camera frames to the gpu_detect service
+The screenless core: sends camera frames to the laptop's detect service
 (~4 fps, only boxes come back) and holds a snapshot (latest frame +
 detections) behind a lock. It knows nothing about the browser, SSE, or HTTP
 serving — those responsibilities moved to demo/display/. The voice loop
@@ -24,7 +24,7 @@ from demo.detections import detections_to_dicts
 
 LOG = logging.getLogger(__name__)
 
-# After how many consecutive failed POSTs to gpu_detect the source is
+# After how many consecutive failed POSTs to detect_service the source is
 # considered unhealthy (healthy() == False). A single glitch (a brief network
 # blip) shouldn't trip the signal — what matters is a sustained run
 # of failures.
@@ -37,7 +37,7 @@ def frame_to_jpeg(frame: np.ndarray, quality: int = 80) -> bytes:
     return buf.getvalue()
 
 
-class GpuDetectSource:
+class RemoteDetectSource:
     """Sends camera frames to the laptop's detect service, holds the latest snapshot.
 
     `latest()` always returns a list (even after an error — an empty one), so
@@ -90,7 +90,7 @@ class GpuDetectSource:
         return self._consecutive_failures < MAX_CONSECUTIVE_FAILURES
 
     def _post_detect(self, frame: np.ndarray) -> list[dict] | None:
-        """POST a frame to gpu_detect. None means a failure (the service
+        """POST a frame to detect_service. None means a failure (the service
         unreachable or failing), [] means the service responded but found
         nothing (empty scene)."""
         try:
@@ -105,7 +105,8 @@ class GpuDetectSource:
                 self._latest_faces = list(resp.get("faces", []))
             return resp.get("detections", [])
         except Exception as exc:  # noqa: BLE001 — the service may drop out, don't kill the loop
-            LOG.warning("gpu_detect POST failed: %s: %s", type(exc).__name__, exc)
+            LOG.warning("detect_service POST failed: %s: %s",
+                        type(exc).__name__, exc)
             return None
 
     def _cycle(self) -> None:
@@ -155,7 +156,7 @@ class GpuDetectSource:
             self._stop.wait(self._interval)
 
 
-class LocalDetectSource(GpuDetectSource):
+class LocalDetectSource(RemoteDetectSource):
     """The same loop, with the models in this process instead of over HTTP.
 
     Everything that makes the remote source what it is — the cadence, the
@@ -163,7 +164,7 @@ class LocalDetectSource(GpuDetectSource):
     is inherited untouched; only the step that turns one frame into boxes
     changes. That is the spec's requirement for a local detector: the same
     boxes at the same cadence — and they come from the same code: the Mac's
-    service (demo/gpu_detect.py) runs this same emulator/detector.Detector,
+    service (demo/detect_service.py) runs this same emulator/detector.Detector,
     only behind HTTP.
 
     Faces ride along on the same cycle for the same reason they do remotely:

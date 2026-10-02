@@ -1,4 +1,4 @@
-"""demo/gpu_detect.py: the HTTP handler, with a stand-in detector, and the
+"""demo/detect_service.py: the HTTP handler, with a stand-in detector, and the
 detector behind it — a JPEG in, JSON-ready dicts out."""
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from http.server import HTTPServer
 
 import pytest
 
-from demo.gpu_detect import MAX_BODY, make_handler, parse_args
+from demo.detect_service import MAX_BODY, make_handler, parse_args
 
 
 def test_objects_decodes_the_jpeg_as_rgb_and_answers_in_json_dicts(monkeypatch):
@@ -19,7 +19,7 @@ def test_objects_decodes_the_jpeg_as_rgb_and_answers_in_json_dicts(monkeypatch):
 
     from PIL import Image
 
-    import demo.gpu_detect as gpu_detect
+    import demo.detect_service as detect_service
     from emulator.detector import Detection
 
     seen = {}
@@ -32,10 +32,11 @@ def test_objects_decodes_the_jpeg_as_rgb_and_answers_in_json_dicts(monkeypatch):
             seen["frame"] = frame
             return [Detection(41, 0.8, (0.1, 0.2, 0.3, 0.4))]
 
-    monkeypatch.setattr(gpu_detect, "Detector", FakeDetector)
+    monkeypatch.setattr(detect_service, "Detector", FakeDetector)
     jpeg = io.BytesIO()
     Image.new("RGB", (64, 48), (255, 0, 0)).save(jpeg, "JPEG")
-    out = gpu_detect.Objects("model.tflite", score_threshold=0.4).detect(jpeg.getvalue())
+    out = detect_service.Objects("model.tflite",
+                                 score_threshold=0.4).detect(jpeg.getvalue())
     assert json.loads(json.dumps(out)) == [
         {"label": "cup", "score": 0.8, "box": [0.1, 0.2, 0.3, 0.4]}]
     frame = seen["frame"]
@@ -71,7 +72,7 @@ class BrokenDetector:
 
 
 class _RunningServer:
-    """Runs a single-threaded HTTPServer (like gpu_detect.main()) on a
+    """Runs a single-threaded HTTPServer (like detect_service.main()) on a
     background thread — tested via real HTTP requests rather than a
     hand-assembled Handler."""
 
@@ -152,7 +153,7 @@ def test_detector_exception_returns_500_and_is_logged(caplog):
     try:
         host, port = srv.address
         conn = http.client.HTTPConnection(host, port, timeout=5)
-        with caplog.at_level("ERROR", logger="demo.gpu_detect"):
+        with caplog.at_level("ERROR", logger="demo.detect_service"):
             conn.request("POST", "/detect", body=b"junk-jpeg-bytes")
             resp = conn.getresponse()
             resp.read()

@@ -29,9 +29,9 @@
 # voice-start ALSO needs to know where the models are (demo/run_demo.py's
 # --brain flag), so BRAIN has no default and voice-start fails loudly if it's
 # unset rather than silently pointing at the wrong host:
-#   BRAIN=<laptop-host-or-ip>   # REQUIRED for voice-start: serve.py/gpu_detect/embed_service
+#   BRAIN=<laptop-host-or-ip>   # REQUIRED for voice-start: serve.py/detect_service/embed_service
 #   BRAIN_PORT=9500             # demo/serve.py
-#   GPU_DETECT_PORT=9600        # demo/gpu_detect.py
+#   DETECT_PORT=9600            # demo/detect_service.py
 #   EMBED_PORT=9900             # demo/embed_service.py
 #   WEB_PORT=8091               # the dashboard on the Mac (demo/display/web.py);
 #                               # the voice loop pushes its events there, so it
@@ -52,7 +52,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # — voice loop —
 BRAIN_PORT="${BRAIN_PORT:-9500}"
-GPU_DETECT_PORT="${GPU_DETECT_PORT:-9600}"
+DETECT_PORT="${DETECT_PORT:-9600}"
 EMBED_PORT="${EMBED_PORT:-9900}"
 WEB_PORT="${WEB_PORT:-8091}"
 MEMORY_DIR="${MEMORY_DIR:-${REMOTE_DIR}/memory}"
@@ -73,7 +73,7 @@ VOICE_LOG="${REMOTE_DIR}/voice.log"
 # Every value above ends up inside a command the robot's shell runs. None of
 # them has a reason to hold a quote, a space or a semicolon, so one that does
 # is refused here rather than quoted around everywhere it is used.
-for name in ROBOT ROBOT_USER PORT BRAIN BRAIN_PORT GPU_DETECT_PORT EMBED_PORT \
+for name in ROBOT ROBOT_USER PORT BRAIN BRAIN_PORT DETECT_PORT EMBED_PORT \
             WEB_PORT MEMORY_DIR DAEMON_PY ON_ROBOT DEMO_VENV; do
   value="${!name:-}"
   case "$value" in
@@ -278,7 +278,7 @@ case "${1:-status}" in
 
   voice-start)
     # BRAIN has no default (unlike ROBOT/PORT above) on purpose: this points
-    # at wherever serve.py/gpu_detect.py/embed_service.py run (the Mac, in
+    # at wherever serve.py/detect_service.py/embed_service.py run (the Mac, in
     # the robot-native architecture — see demo/run_demo.py's --brain), and
     # there's no host that's a safe guess for that. Fail loudly here rather
     # than silently start a voice loop that can never reach its own brain.
@@ -399,7 +399,7 @@ case "${1:-status}" in
       '$RUN_PY' -u -m demo.run_demo \
       --camera robot --mic robot --speaker robot \
       --robot-host 127.0.0.1 --robot-camera-port $PORT \
-      --brain '$BRAIN' --port $BRAIN_PORT --gpu-detect-port $GPU_DETECT_PORT \
+      --brain '$BRAIN' --port $BRAIN_PORT --detect-port $DETECT_PORT \
       --embed-port $EMBED_PORT --display remote --dashboard-host '$BRAIN' \
       --web-port $WEB_PORT \
       --memory-dir '$MEMORY_DIR' \
