@@ -31,7 +31,7 @@ def test_every_mac_side_service_is_started():
 
 def test_ports_and_flags_reach_the_command_lines():
     services = _by_name(("--port", "9501", "--embed-port", "9901",
-                         "--gpu-detect-port", "9601", "--web-port", "8081",
+                         "--detect-port", "9601", "--web-port", "8081",
                          "--robot-host", "robot.local",
                          "--llm", "/models/x.litertlm", "--asr", "moonshine"))
     assert services["serve"].port == 9501
@@ -54,13 +54,13 @@ def test_the_serve_readiness_line_follows_the_warmup():
 def test_every_service_accepts_the_command_line_it_is_started_with():
     # The launcher and the services are separate programs: an argument one
     # stops accepting breaks the other only at start, in front of the room.
-    from demo import embed_service, gpu_detect, serve
+    from demo import embed_service, detect_service, serve
     from demo.display import web
 
     services = _by_name(("--llm", "/models/x.litertlm", "--no-warmup",
                          "--asr", "moonshine", "--asr-model", "base.en"))
     serve.parse_args(services["serve"].argv[4:])
-    gpu_detect.parse_args(services["detect"].argv[4:])
+    detect_service.parse_args(services["detect"].argv[4:])
     web.parse_args(services["dash"].argv[4:])
     import unittest.mock as mock
 
@@ -241,9 +241,9 @@ def test_a_service_that_exits_unblocks_the_wait():
 
 
 def test_stop_asks_every_live_service_to_go_and_kills_what_stays():
-    services = [Service("detect", ["x"], 9600, "gpu_detect on"),
+    services = [Service("detect", ["x"], 9600, "detect_service on"),
                 Service("dash", ["y"], 8080, "dashboard on")]
-    stubborn = _FakeProcess(_running(["gpu_detect on :9600\n"]), hang=True)
+    stubborn = _FakeProcess(_running(["detect_service on :9600\n"]), hang=True)
     polite = _FakeProcess(_running(["dashboard on http://0.0.0.0:8080\n"]))
     supervisor, sent, _out = _supervisor(services, {"detect": stubborn,
                                                     "dash": polite})
@@ -266,7 +266,7 @@ def test_the_robot_is_told_the_brain_and_every_port_this_run_uses():
     assert env["ROBOT"] == "robot.local"
     assert env["BRAIN_PORT"] == "9501"
     assert env["WEB_PORT"] == "8091"
-    assert env["EMBED_PORT"] == "9900" and env["GPU_DETECT_PORT"] == "9600"
+    assert env["EMBED_PORT"] == "9900" and env["DETECT_PORT"] == "9600"
 
 
 def test_robot_commands_run_the_script_with_that_environment(monkeypatch):

@@ -2,7 +2,7 @@ import logging
 
 import numpy as np
 
-from demo.detect_source import GpuDetectSource
+from demo.detect_source import RemoteDetectSource
 
 
 class FakeCamera:
@@ -17,7 +17,7 @@ FRAME = np.zeros((8, 8, 3), np.uint8)
 
 
 def test_latest_returns_frame_and_detections_snapshot():
-    source = GpuDetectSource(FakeCamera(FRAME), "http://x/detect")
+    source = RemoteDetectSource(FakeCamera(FRAME), "http://x/detect")
     dets = [{"label": "cup", "score": 0.8, "box": [0.4, 0.4, 0.6, 0.6]}]
     source._post_detect = lambda frame: dets
     source._cycle()
@@ -27,7 +27,7 @@ def test_latest_returns_frame_and_detections_snapshot():
 
 
 def test_latest_is_a_snapshot_copy_not_shared_state():
-    source = GpuDetectSource(FakeCamera(FRAME), "http://x/detect")
+    source = RemoteDetectSource(FakeCamera(FRAME), "http://x/detect")
     source._post_detect = lambda frame: []
     source._cycle()
     frame, _ = source.latest()
@@ -37,14 +37,14 @@ def test_latest_is_a_snapshot_copy_not_shared_state():
 
 
 def test_no_frame_yet_returns_none_and_empty_list():
-    source = GpuDetectSource(FakeCamera(None), "http://x/detect")
+    source = RemoteDetectSource(FakeCamera(None), "http://x/detect")
     frame, dets = source.latest()
     assert frame is None
     assert dets == []
 
 
 def test_listener_fires_each_cycle_with_fresh_detections():
-    source = GpuDetectSource(FakeCamera(FRAME), "http://x/detect")
+    source = RemoteDetectSource(FakeCamera(FRAME), "http://x/detect")
     calls = []
     source.add_listener(calls.append)
     responses = iter([[{"label": "person"}], [{"label": "cup"}]])
@@ -55,7 +55,7 @@ def test_listener_fires_each_cycle_with_fresh_detections():
 
 
 def test_cycle_skips_when_camera_has_no_frame_yet():
-    source = GpuDetectSource(FakeCamera(None), "http://x/detect")
+    source = RemoteDetectSource(FakeCamera(None), "http://x/detect")
     calls = []
     source.add_listener(calls.append)
     source._cycle()
@@ -63,7 +63,7 @@ def test_cycle_skips_when_camera_has_no_frame_yet():
 
 
 def test_post_detect_failure_is_logged(monkeypatch, caplog):
-    source = GpuDetectSource(FakeCamera(FRAME), "http://x/detect")
+    source = RemoteDetectSource(FakeCamera(FRAME), "http://x/detect")
 
     def boom(*a, **k):
         raise OSError("gpu down")
@@ -78,7 +78,7 @@ def test_post_detect_failure_is_logged(monkeypatch, caplog):
 
 def test_none_vs_empty_list_distinction_for_healthy():
     """None (failure) bumps the failure counter; [] (empty scene) resets it."""
-    source = GpuDetectSource(FakeCamera(FRAME), "http://x/detect")
+    source = RemoteDetectSource(FakeCamera(FRAME), "http://x/detect")
     source._post_detect = lambda frame: None
     source._cycle()
     source._cycle()
@@ -92,7 +92,7 @@ def test_none_vs_empty_list_distinction_for_healthy():
 
 
 def test_healthy_flips_false_after_n_consecutive_failures():
-    source = GpuDetectSource(FakeCamera(FRAME), "http://x/detect")
+    source = RemoteDetectSource(FakeCamera(FRAME), "http://x/detect")
     source._post_detect = lambda frame: None
     for _ in range(4):
         source._cycle()
@@ -102,7 +102,7 @@ def test_healthy_flips_false_after_n_consecutive_failures():
 
 
 def test_healthy_recovers_after_a_success():
-    source = GpuDetectSource(FakeCamera(FRAME), "http://x/detect")
+    source = RemoteDetectSource(FakeCamera(FRAME), "http://x/detect")
     source._post_detect = lambda frame: None
     for _ in range(5):
         source._cycle()
@@ -136,7 +136,7 @@ def test_faces_ride_back_with_the_boxes(monkeypatch):
                        "ms": 12}).encode()
     monkeypatch.setattr("urllib.request.urlopen",
                         lambda req, timeout=None: _Response(body))
-    source = GpuDetectSource(FakeCamera(FRAME), "http://mac:9600/detect")
+    source = RemoteDetectSource(FakeCamera(FRAME), "http://mac:9600/detect")
     assert source.faces() == []
     assert source._post_detect(FRAME) == [{"label": "person"}]
     assert source.faces() == [{"box": [0.3, 0.2, 0.6, 0.7], "score": 0.9}]
@@ -158,7 +158,7 @@ def test_a_service_without_face_detection_just_has_no_faces(monkeypatch):
 
     monkeypatch.setattr("urllib.request.urlopen",
                         lambda req, timeout=None: _Response())
-    source = GpuDetectSource(FakeCamera(FRAME), "http://mac:9600/detect")
+    source = RemoteDetectSource(FakeCamera(FRAME), "http://mac:9600/detect")
     source._post_detect(FRAME)
     assert source.faces() == []
 
@@ -256,7 +256,7 @@ def test_a_camera_with_nothing_current_empties_the_snapshot():
     # Otherwise the last frame before the camera died is what the model gets
     # as the picture of "now".
     camera = FakeCamera(np.zeros((4, 4, 3), np.uint8))
-    source = GpuDetectSource(camera, "http://x/detect")
+    source = RemoteDetectSource(camera, "http://x/detect")
     source._post_detect = lambda frame: [{"label": "cup", "score": 0.9,
                                           "box": [0, 0, 1, 1]}]
     source._cycle()

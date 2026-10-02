@@ -97,10 +97,10 @@ def build_services(args) -> list[Service]:
                 args.port,
                 # Without the warmup there is no "warm in" line to wait for.
                 "model service on" if args.no_warmup else "warm in"),
-        Service("detect", [python, "-u", "-m", "demo.gpu_detect",
-                           "--port", str(args.gpu_detect_port),
+        Service("detect", [python, "-u", "-m", "demo.detect_service",
+                           "--port", str(args.detect_port),
                            "--host", "0.0.0.0"],
-                args.gpu_detect_port, "gpu_detect on"),
+                args.detect_port, "detect_service on"),
     ]
     if not args.sim:
         # With --sim the voice loop runs here and serves the dashboard itself,
@@ -125,7 +125,7 @@ def voice_loop_service(args) -> Service:
     daemon at --robot-host — and the dashboard, which it serves itself."""
     return Service("voice", [sys.executable, "-u", "-m", "demo.run_demo",
                              "--brain", "127.0.0.1", "--port", str(args.port),
-                             "--gpu-detect-port", str(args.gpu_detect_port),
+                             "--detect-port", str(args.detect_port),
                              "--embed-port", str(args.embed_port),
                              "--web-port", str(args.web_port),
                              "--robot-host", args.robot_host,
@@ -354,7 +354,7 @@ def robot_env(args, brain: str) -> dict[str, str]:
     the dashboard listens somewhere else."""
     return {"BRAIN": brain, "ROBOT": args.robot_host,
             "BRAIN_PORT": str(args.port),
-            "GPU_DETECT_PORT": str(args.gpu_detect_port),
+            "DETECT_PORT": str(args.detect_port),
             "EMBED_PORT": str(args.embed_port),
             "WEB_PORT": str(args.web_port)}
 
@@ -602,8 +602,8 @@ def parse_args(argv=None):
                    help="demo/serve.py — speech recognition, the LLM, the voice")
     p.add_argument("--embed-port", type=int, default=EMBED_PORT,
                    help="demo/embed_service.py — SigLIP, bge, faces")
-    p.add_argument("--gpu-detect-port", type=int, default=9600,
-                   help="demo/gpu_detect.py — the object detector")
+    p.add_argument("--detect-port", type=int, default=9600,
+                   help="demo/detect_service.py — the object detector")
     p.add_argument("--web-port", type=int, default=DEFAULT_DASHBOARD_PORT,
                    help="the dashboard, and where the robot pushes its events")
     p.add_argument("--robot-host", default=None,

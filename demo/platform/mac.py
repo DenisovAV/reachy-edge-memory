@@ -206,7 +206,7 @@ class MacPlatform:
     def video_source(self) -> VideoSource:
         # --camera {mac,robot}: the demo's hard requirement is that what
         # gets remembered is what the ROBOT saw, so this is a configuration
-        # choice, not a code fork — the voice loop, GpuDetectSource, and the
+        # choice, not a code fork — the voice loop, RemoteDetectSource, and the
         # dashboard all consume whichever VideoSource comes back and must
         # not know the difference. Lazy import mirrors robot()/make_player()
         # below: the alternative backend's module is only pulled in once

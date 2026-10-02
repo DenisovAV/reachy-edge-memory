@@ -170,12 +170,12 @@ def test_a_family_this_run_turned_off_is_reported_off():
 
 
 def test_the_detector_source_is_the_mac_service_by_default():
-    from demo.detect_source import GpuDetectSource
+    from demo.detect_source import RemoteDetectSource
     from demo.run_demo import build_detect_source
 
     source = build_detect_source(args(), camera=None,
                                  detect_url="http://mac:9600/detect")
-    assert isinstance(source, GpuDetectSource)
+    assert isinstance(source, RemoteDetectSource)
     assert source.detect_url == "http://mac:9600/detect"
 
 

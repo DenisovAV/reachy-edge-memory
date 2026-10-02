@@ -169,7 +169,7 @@ class RemoteDisplayClient:
             # Log the transition only, not every failure: a refused
             # connection fails in milliseconds, so an unguarded warning here
             # would bury real output for as long as the Mac dashboard is down
-            # (same shape as GpuDetectSource/RobotCameraSource's own
+            # (same shape as RemoteDetectSource/RobotCameraSource's own
             # transition-only logging).
             if self._consecutive_failures == 0:
                 LOG.warning("dashboard push failed: %s: %s (further "

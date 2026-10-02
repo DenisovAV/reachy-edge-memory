@@ -3,7 +3,7 @@ camera (demo/camera_service.py) over HTTP. What gets remembered has to be
 what the ROBOT saw, not the laptop's webcam.
 
 Follows the exact client shape already established by
-demo/detect_source.py::GpuDetectSource: a background thread polls the
+demo/detect_source.py::RemoteDetectSource: a background thread polls the
 service on its own schedule and keeps the newest decoded frame behind a
 lock, so `latest()` never blocks the voice loop on the network, and a
 `_cycle()` method is split out of the poll loop so tests can drive it
@@ -39,13 +39,13 @@ LOG = logging.getLogger(__name__)
 from demo.camera_service import DEFAULT_PORT, FRAME_PATH
 
 # Consecutive failed GETs before `alive` flips False — same threshold and
-# same reasoning as GpuDetectSource.MAX_CONSECUTIVE_FAILURES: a single
+# same reasoning as RemoteDetectSource.MAX_CONSECUTIVE_FAILURES: a single
 # dropped packet on a conference network shouldn't flip the health signal,
 # only a sustained outage should.
 MAX_CONSECUTIVE_FAILURES = 5
 
 # Bounded wait for a single GET so a hung/dead service can't stall the
-# poll loop forever — mirrors GpuDetectSource's urlopen(timeout=5), shorter
+# poll loop forever — mirrors RemoteDetectSource's urlopen(timeout=5), shorter
 # here since a frame fetch has much less work to do than a detect pass.
 DEFAULT_TIMEOUT_S = 2.0
 DEFAULT_POLL_INTERVAL_S = 0.1
@@ -64,7 +64,7 @@ def frame_url(host: str, port: int = DEFAULT_PORT) -> str:
 class RobotCameraSource:
     """VideoSource pulling the newest JPEG frame from the robot's camera
     service — a drop-in for CameraStream (Mac webcam): the voice loop,
-    GpuDetectSource, and the dashboard all consume `latest()`/`latest_png()`/
+    RemoteDetectSource, and the dashboard all consume `latest()`/`latest_png()`/
     `close()` and must not know which one they were handed.
     """
 
@@ -135,7 +135,7 @@ class RobotCameraSource:
     def _cycle(self) -> None:
         """One poll step: GET -> decode -> snapshot. Split out of
         `_poll_loop` so tests can drive it deterministically, without
-        threads or sleeps (mirrors GpuDetectSource._cycle)."""
+        threads or sleeps (mirrors RemoteDetectSource._cycle)."""
         jpeg = self._fetch_jpeg()
         frame = self._decode(jpeg) if jpeg is not None else None
         if frame is None:
