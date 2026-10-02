@@ -340,3 +340,13 @@ def test_a_value_that_would_break_out_of_the_remote_command_is_refused(tmp_path,
     assert result.returncode == 2
     assert name in result.stderr
     assert "reached ssh" not in result.stdout + result.stderr
+
+
+def test_the_robot_is_carried_the_detector_the_code_loads():
+    # Change the detector in emulator/models.py, and the deploy follows: a
+    # robot without it would download it mid-demo, or fail offline.
+    from emulator import models
+
+    case = SCRIPT.index("*,detector,*)")
+    carried = SCRIPT[case:SCRIPT.index(";;", case)].split()[-1].strip('"')
+    assert carried == models.DETECTOR

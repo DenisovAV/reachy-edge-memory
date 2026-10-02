@@ -2,8 +2,9 @@
 suppression, and what counts as a change of scene.
 
 The preparation and decoding are tested on synthetic tensors; the model
-itself runs in test_detector_finds_people_in_the_models_own_sample_photo when it is in the
-local Hugging Face cache (it is skipped otherwise, never downloaded here).
+itself runs in the last three tests — the sample photo, and two crops of it
+that pin why there is NMS and why at 0.7 — when it is in the local Hugging
+Face cache (they are skipped otherwise, never downloaded here).
 """
 
 from pathlib import Path
@@ -66,6 +67,7 @@ def test_letterbox_scales_to_unit_range_keeps_rgb_and_puts_channels_first():
 def test_letterbox_fits_a_wide_frame_and_pads_the_bottom():
     frame = np.full((540, 960, 3), 51, np.uint8)
     tensor, fit = letterbox(frame, SIZE)
+    assert (fit.frame_width, fit.frame_height) == (960, 540)
     assert fit.ratio == pytest.approx(SIZE / 960)
     height = round(540 * fit.ratio)            # 360 rows of picture
     assert tensor[0, 0, height - 1, 0] == pytest.approx(51 / 255)
@@ -99,6 +101,13 @@ def test_decode_maps_input_pixels_back_to_frame_fractions():
     [found] = decode_output(raw, 0.3, fit)
     assert found.label == 41 and found.score == pytest.approx(0.8)
     assert found.box == pytest.approx((192 / 832, 320 / 832, 256 / 832, 384 / 832))
+
+
+def test_decode_maps_a_landscape_frame_without_mixing_width_and_height():
+    # A 1280x720 frame halved into the canvas: 640x360 of picture.
+    raw = _raw((320, 90, 480, 270, 0.8, 0))
+    [found] = decode_output(raw, 0.3, Letterbox(0.5, frame_width=1280, frame_height=720))
+    assert found.box == pytest.approx((0.5, 0.25, 0.75, 0.75))
 
 
 def test_decode_drops_what_is_under_the_threshold():
@@ -148,7 +157,7 @@ def test_nms_keeps_distant_boxes():
 
 
 def test_nms_keeps_different_classes_at_same_place():
-    # A person holding a cup occupy the same region — both are needed.
+    # A person and the cup they hold occupy the same region — both are needed.
     a = Detection(label=0, score=0.9, box=(0.1, 0.1, 0.5, 0.5))
     b = Detection(label=41, score=0.8, box=(0.1, 0.1, 0.5, 0.5))
     assert len(non_max_suppression([a, b])) == 2
@@ -188,10 +197,48 @@ def test_detector_reads_its_input_size_and_forwards_threads(monkeypatch):
 
 
 def test_detector_refuses_an_input_that_is_not_three_square_channels(monkeypatch):
-    monkeypatch.setattr("emulator.litert_runtime.build_runner",
-                        _fake_runner({}, shape=(1, SIZE, SIZE, 3)))
-    with pytest.raises(ValueError):
-        Detector(Path("fake.tflite"))
+    for shape in ((1, 4, SIZE, SIZE), (1, 3, SIZE, SIZE // 2)):
+        monkeypatch.setattr("emulator.litert_runtime.build_runner",
+                            _fake_runner({}, shape=shape))
+        with pytest.raises(ValueError):
+            Detector(Path("fake.tflite"))
+
+
+class _CannedSig(_FakeSig):
+    """A head that answers every frame with the same rows."""
+
+    def __init__(self, raw):
+        super().__init__((1, 3, SIZE, SIZE))
+        self.raw, self.seen = raw, None
+
+    def __call__(self, **inputs):
+        self.seen = inputs
+        return {"output_0": self.raw}
+
+
+def test_detect_drops_a_repeat_but_keeps_two_people_one_behind_the_other(monkeypatch):
+    # The overlaps the module docstring measured: repeats at 0.81 IoU or more,
+    # two different people at up to 0.52. Canvas pixels of a 1280x720 frame.
+    sig = _CannedSig(_raw((20, 40, 180, 340, 0.9, 0),       # a person
+                          (20, 94, 180, 340, 0.6, 0),       # the head repeating them, IoU 0.82
+                          (250, 40, 450, 340, 0.8, 0),      # a second person ...
+                          (313, 40, 513, 340, 0.7, 0),      # ... one half behind them, IoU 0.52
+                          (560, 200, 620, 260, 0.45, 41)))  # a cup under this threshold
+
+    class Runner:
+        def __init__(self, model_path, threads=4, **kwargs):
+            pass
+
+        def only(self):
+            return sig
+
+    monkeypatch.setattr("emulator.litert_runtime.build_runner", Runner)
+    found = Detector(Path("fake.tflite"), score_threshold=0.5).detect(
+        np.zeros((720, 1280, 3), np.uint8))
+    assert [(d.label, d.score) for d in found] == [
+        (0, pytest.approx(0.9)), (0, pytest.approx(0.8)), (0, pytest.approx(0.7))]
+    assert found[0].box == pytest.approx((20 / 640, 40 / 360, 180 / 640, 340 / 360))
+    assert sig.seen["images"].shape == (1, 3, SIZE, SIZE)
 
 
 def _cached(filename):
@@ -231,13 +278,15 @@ def test_detector_finds_people_in_the_models_own_sample_photo():
 def test_a_person_cut_off_by_the_frame_is_one_box(monkeypatch):
     """Why there is NMS: cropped so the people are cut off at the bottom —
     how the robot sees whoever it talks to — the head gives one of them
-    twice, and the detector keeps one."""
+    twice, and the detector keeps one. Looked for at 0.1, not at the 0.3 the
+    robot uses: there the repeat scores 0.31, and a re-encoded JPEG or a new
+    Pillow would move it under."""
     from PIL import Image
 
     import emulator.detector as detector_module
 
     detector = Detector(Path(_cached("yolo26n_conv2d_f16_weights.tflite")),
-                        threads=2)
+                        threads=2, score_threshold=0.1)
     crop = np.asarray(Image.open(_cached("samples/sample.jpg")).convert("RGB")
                       .crop((84, 557, 693, 1174)))
 

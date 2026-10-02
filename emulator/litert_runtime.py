@@ -176,7 +176,7 @@ class CompiledRunner:
                  threads: int = 4) -> None:
         # CompiledModel defaults to CpuOptions(num_threads=1); the old
         # Interpreter path ran 4 threads. Without this the CPU stages regress
-        # ~1.75–2.6× (detector 181→316 ms). Pass the thread count explicitly.
+        # ~1.75–2.6×. Pass the thread count explicitly.
         if accel == HardwareAccelerator.CPU:
             options = Options(hardware_accelerators=HardwareAccelerator.CPU,
                               cpu_options=CpuOptions(num_threads=threads))
@@ -293,5 +293,5 @@ def build_runner(model_path, *, accel: HardwareAccelerator = HardwareAccelerator
             "LiteRT's GPU accelerator cannot run on this processor: it is "
             "built with the ARMv8 crypto extensions and this CPU has none "
             f"(see compiled_model_runs_here, {RUNNER_ENV} overrides). Run the "
-            "detector on the CPU, or on a board whose CPU has them.")
+            "model on the CPU, or on a board whose CPU has them.")
     return InterpreterRunner(model_path, threads=threads)

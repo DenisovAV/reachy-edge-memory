@@ -6,26 +6,32 @@ requirements: stay cheap, and don't count frame jitter as an event.
 
 The model is Ultralytics' **YOLO26n** (COCO, AGPL-3.0) in the LiteRT export
 Arm publishes as `Arm/yolo26n-fp16-litert`. It is downloaded on first use and
-is not part of this repository (NOTICE). Its contract, from the model's
-manifest and checked against the tensors on its sample photo:
+is not part of this repository (NOTICE). Its contract: the shapes and pixel
+coordinates from the model's manifest, the rest Ultralytics' conventions. The
+sample photo confirms the [0, 1] scale and the channels-first layout; it
+cannot tell RGB from BGR (tests/test_detector.py).
 
 - **Input** `[1, 3, 640, 640]`, NCHW, **RGB in [0, 1]**, letterboxed: scaled
   uniformly to fit, padded bottom/right with gray 114/255.
 - **Output** `[1, 300, 6]`: one row per detection, best first — the box
   corners (x1, y1, x2, y2) in input pixels, the score, the COCO class.
-  YOLO26's head is meant to need no NMS, but this export does leave repeats:
-  a person cut off by the bottom of the frame — how the robot sees whoever it
-  talks to — came back twice, 0.74 and 0.31 at 0.97 IoU. So NMS is applied
-  here, at 0.7 IoU (Ultralytics' own default), not the 0.4 Arm's manifest
-  names: over 99 frames every repeat overlapped its keeper at 0.81 or more,
-  and two different people, one partly behind the other, at 0.47 and 0.52 —
-  0.4 merged them.
+  YOLO26 is designed to need no NMS, but Arm's manifest for this export asks
+  for NMS outside the graph (`is_nms_exported: false`), and the export does
+  leave repeats: a person cut off by the bottom of the frame — how the robot
+  sees whoever it talks to — came back twice, 0.74 and 0.31 at 0.97 IoU. So
+  NMS is applied here, at 0.7 IoU (Ultralytics' own default), not the 0.4 the
+  manifest names: over 99 frames (crops of the sample photo, face shots, a
+  few camera frames) every repeat overlapped its keeper at 0.81 or more, and
+  two different people, one partly behind the other, at 0.47 and 0.52 — 0.4
+  merged them. tests/test_detector.py pins the 0.97 repeat and the 0.47 pair
+  on crops of the sample photo.
 
-That head lowers to INT64 select ops the LiteRT GPU delegate rejects (on the
-Mac's Metal as on the Pi 5's VideoCore), so the detector runs on CPU cores
-wherever a frame becomes boxes: this `Detector`, on the robot
-(`--on-robot detector`) and in the laptop's service (demo/gpu_detect.py),
-where a frame takes about 20 ms.
+That head's post-processing — INT64 casts, selects and reshapes, and
+GATHER_ND — is not supported by the LiteRT GPU delegate, and CompiledModel
+fails to build for the GPU (on the Mac's Metal as on the Pi 5's VideoCore),
+so the detector runs on CPU cores wherever a frame becomes boxes: this
+`Detector`, on the robot (`--on-robot detector`) and in the laptop's service
+(demo/gpu_detect.py), where a frame takes about 20 ms.
 """
 
 from __future__ import annotations
@@ -128,8 +134,8 @@ def non_max_suppression(detections: list[Detection],
                         iou_threshold: float = NMS_IOU) -> list[Detection]:
     """Keep a single box per object.
 
-    Classes are suppressed independently: a person holding a cup occupy the
-    same region of the frame, and both are needed.
+    Classes are suppressed independently: a person and the cup they hold
+    occupy the same region of the frame, and both are needed.
     """
     kept: list[Detection] = []
     for candidate in sorted(detections, key=lambda d: d.score, reverse=True):

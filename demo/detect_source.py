@@ -162,8 +162,9 @@ class LocalDetectSource(GpuDetectSource):
     listeners the dashboard hangs off, `latest()`, `faces()`, `healthy()` —
     is inherited untouched; only the step that turns one frame into boxes
     changes. That is the spec's requirement for a local detector: the same
-    boxes at the same cadence, not the same object as the Mac's service
-    (demo/gpu_detect.py, which serves the same emulator/detector.Detector).
+    boxes at the same cadence — and they come from the same code: the Mac's
+    service (demo/gpu_detect.py) runs this same emulator/detector.Detector,
+    only behind HTTP.
 
     Faces ride along on the same cycle for the same reason they do remotely:
     the head tracker (demo/run_demo.py's FaceTracker) is fed from them four

@@ -229,4 +229,5 @@ No robot, camera or model download needed.
 ## License
 
 Apache-2.0 (see `LICENSE`). The models and several libraries have their own
-licenses, and the voice uses GPL-licensed libraries at run time — see `NOTICE`.
+licenses: the object detector, YOLO26n, is AGPL-3.0, and the voice uses
+GPL-licensed libraries at run time — see `NOTICE`.

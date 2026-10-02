@@ -1,6 +1,5 @@
-"""demo/gpu_detect.py's HTTP handler, with a stand-in detector: a real
-Objects needs the detector model, and make_handler only ever calls .detect().
-"""
+"""demo/gpu_detect.py: the HTTP handler, with a stand-in detector, and the
+detector behind it — a JPEG in, JSON-ready dicts out."""
 from __future__ import annotations
 
 import http.client
@@ -11,6 +10,39 @@ from http.server import HTTPServer
 import pytest
 
 from demo.gpu_detect import MAX_BODY, make_handler, parse_args
+
+
+def test_objects_decodes_the_jpeg_as_rgb_and_answers_in_json_dicts(monkeypatch):
+    # The robot reads these as JSON: a Detection object here would drop every
+    # answer, and the robot would see nothing at all.
+    import io
+
+    from PIL import Image
+
+    import demo.gpu_detect as gpu_detect
+    from emulator.detector import Detection
+
+    seen = {}
+
+    class FakeDetector:
+        def __init__(self, path, threads=4, score_threshold=0.3):
+            seen.update(threads=threads, threshold=score_threshold)
+
+        def detect(self, frame):
+            seen["frame"] = frame
+            return [Detection(41, 0.8, (0.1, 0.2, 0.3, 0.4))]
+
+    monkeypatch.setattr(gpu_detect, "Detector", FakeDetector)
+    jpeg = io.BytesIO()
+    Image.new("RGB", (64, 48), (255, 0, 0)).save(jpeg, "JPEG")
+    out = gpu_detect.Objects("model.tflite", score_threshold=0.4).detect(jpeg.getvalue())
+    assert json.loads(json.dumps(out)) == [
+        {"label": "cup", "score": 0.8, "box": [0.1, 0.2, 0.3, 0.4]}]
+    frame = seen["frame"]
+    assert frame.shape == (48, 64, 3)
+    assert frame[..., 0].mean() > 200 and frame[..., 2].mean() < 50, "red stays first"
+    assert seen["threads"] > 1, "CompiledModel would otherwise run on one core"
+    assert seen["threshold"] == 0.4
 
 
 def test_parse_args_host_defaults_to_all_interfaces():
