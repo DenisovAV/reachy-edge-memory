@@ -26,17 +26,17 @@ PCM chunks out to subscribers instead of exposing a single `latest()` value
 — see MicCapture's docstring for how that keeps a slow or absent client from
 growing memory without bound.
 
-Mirrors demo/detect_service.py's shape (argparse --host/--port, localhost
-default with a loud warning when bound wider, quiet logging on 2xx) but must run
-under the robot's plain system python 3.12, where PIL/picamera2/numpy are
-NOT installed (numpy exists only inside the daemon's separate venv) — so,
-unlike detect_service.py, this module is stdlib-only and importable on the Mac
-purely for testing. The HTTP server is threaded (ThreadingHTTPServer, not
-detect_service.py's single-threaded HTTPServer): /audio is a long-lived
-connection that stays open for as long as the Mac is listening, and a
-single-threaded server would leave /frame and /health unanswered — silently
-starving the video half of the demo — for the entire time someone is
-listening to the mic.
+Shaped like the laptop's demo/detect_service.py (argparse --host/--port, quiet
+logging on 2xx), with a localhost default and a loud warning when bound wider,
+but it must run under the robot's plain system python 3.12, where
+PIL/picamera2/numpy are NOT installed (numpy exists only inside the daemon's
+separate venv) — so, unlike detect_service.py, this module is stdlib-only and
+importable on the Mac purely for testing. The HTTP server is threaded
+(ThreadingHTTPServer, not detect_service.py's single-threaded HTTPServer):
+/audio is a long-lived connection that stays open for as long as the Mac is
+listening, and a single-threaded server would leave /frame and /health
+unanswered — silently starving the video half of the demo — for the entire time
+someone is listening to the mic.
 """
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ _EOI = b"\xff\xd9"  # JPEG End Of Image
 # which is exactly the failure mode ("unbounded buffering") a demo running
 # The service's address, imported by the Mac-side client
 # (demo/platform/robot_camera.py) so the two halves cannot drift apart.
-# 9700 sits beside the robot's other demo service, detect_service on 9600.
+# 9700 sits beside the laptop's detect_service on 9600.
 DEFAULT_PORT = 9700
 FRAME_PATH = "/frame"
 HEALTH_PATH = "/health"

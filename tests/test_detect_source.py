@@ -66,13 +66,13 @@ def test_post_detect_failure_is_logged(monkeypatch, caplog):
     source = RemoteDetectSource(FakeCamera(FRAME), "http://x/detect")
 
     def boom(*a, **k):
-        raise OSError("gpu down")
+        raise OSError("service down")
 
     monkeypatch.setattr("urllib.request.urlopen", boom)
     with caplog.at_level(logging.WARNING):
         result = source._post_detect(FRAME)
     assert result is None
-    assert any("OSError" in r.message and "gpu down" in r.message
+    assert any("OSError" in r.message and "service down" in r.message
                 for r in caplog.records)
 
 

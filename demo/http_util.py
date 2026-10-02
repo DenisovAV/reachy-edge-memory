@@ -1,10 +1,10 @@
 """Small shared helpers for the demo's http.server-based services.
 
 serve.py, detect_service.py and display/web.py all expose an HTTP endpoint and
-all hit the same sharp edge: http.server encodes the status line's reason phrase as
-latin-1, so a non-ASCII codepoint in a *dynamic* reason (an exception message,
-a malformed field) makes send_error itself raise UnicodeEncodeError, escaping
-the handler. `ascii_reason` is the one place that guards it.
+all hit the same sharp edge: http.server encodes the status line's reason
+phrase as latin-1, so a non-ASCII codepoint in a *dynamic* reason (an exception
+message, a malformed field) makes send_error itself raise UnicodeEncodeError,
+escaping the handler. `ascii_reason` is the one place that guards it.
 """
 
 from __future__ import annotations
