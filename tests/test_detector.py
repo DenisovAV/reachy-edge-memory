@@ -1,5 +1,5 @@
-"""The detector: YOLO26n's input and output contract, and what counts as a
-change of scene.
+"""The detector: YOLO26n's input and output contract, duplicate
+suppression, and what counts as a change of scene.
 
 The preparation and decoding are tested on synthetic tensors; the model
 itself runs in test_detector_finds_people_in_the_models_own_sample_photo when it is in the
@@ -17,6 +17,7 @@ from emulator.detector import (
     Letterbox,
     decode_output,
     letterbox,
+    non_max_suppression,
     scene_changed,
 )
 
@@ -106,8 +107,8 @@ def test_decode_drops_what_is_under_the_threshold():
     assert [round(d.score, 2) for d in found] == [0.9]
 
 
-def test_decode_keeps_every_box_the_head_gives():
-    # NMS-free: two people side by side, or one behind the other, are two.
+def test_decode_returns_every_row_over_the_threshold():
+    # Overlapping or not: suppressing repeats is the next step, not this one.
     raw = _raw((0, 0, 100, 100, 0.9, 0), (5, 5, 105, 105, 0.8, 0))
     assert len(decode_output(raw, 0.3, Letterbox(1.0, SIZE, SIZE))) == 2
 
@@ -129,6 +130,32 @@ def test_decode_refuses_an_output_it_does_not_understand():
     with pytest.raises(ValueError):
         decode_output(np.zeros((1, 3549, 85), np.float32), 0.3,
                       Letterbox(1.0, SIZE, SIZE))
+
+
+# --- duplicate suppression ---
+
+def test_nms_collapses_overlapping_boxes_of_same_class():
+    a = Detection(label=0, score=0.74, box=(0.1, 0.5, 0.3, 1.0))
+    b = Detection(label=0, score=0.31, box=(0.1, 0.51, 0.3, 1.0))
+    kept = non_max_suppression([b, a])
+    assert kept == [a], "the most confident detection must be kept"
+
+
+def test_nms_keeps_distant_boxes():
+    a = Detection(label=0, score=0.9, box=(0.0, 0.0, 0.2, 0.2))
+    b = Detection(label=0, score=0.8, box=(0.7, 0.7, 0.9, 0.9))
+    assert len(non_max_suppression([a, b])) == 2
+
+
+def test_nms_keeps_different_classes_at_same_place():
+    # A person holding a cup occupy the same region — both are needed.
+    a = Detection(label=0, score=0.9, box=(0.1, 0.1, 0.5, 0.5))
+    b = Detection(label=41, score=0.8, box=(0.1, 0.1, 0.5, 0.5))
+    assert len(non_max_suppression([a, b])) == 2
+
+
+def test_nms_handles_empty_input():
+    assert non_max_suppression([]) == []
 
 
 # --- Detector: the runner, and a real frame ---
@@ -181,14 +208,52 @@ def _cached(filename):
                     or _cached("samples/sample.jpg") is None,
                     reason="yolo26n or its sample photo is not cached")
 def test_detector_finds_people_in_the_models_own_sample_photo():
-    """The one check that the whole path — letterbox, model, decode — sees
-    what a camera sees: a scrambled input or a wrong channel order finds
-    nothing here."""
+    """The whole path — letterbox, model, decode — on the model's own photo:
+    the people it shows, where they stand. A frame fed as raw 0–255 finds
+    "people" everywhere and a scrambled layout finds none; a channel-order
+    mix-up cannot be told apart on this photo (the synthetic letterbox tests
+    pin that)."""
     from PIL import Image
 
     photo = np.asarray(Image.open(_cached("samples/sample.jpg")).convert("RGB"))
     found = Detector(Path(_cached("yolo26n_conv2d_f16_weights.tflite")),
                      threads=2).detect(photo)
     people = [d for d in found if d.label == 0]
-    assert people and max(d.score for d in people) > 0.5
+    assert 6 <= len(people) <= 8
+    best = max(people, key=lambda d: d.score)
+    assert _iou(best.box, (0.015, 0.76, 0.11, 0.93)) > 0.8
     assert all(0.0 <= v <= 1.0 for d in found for v in d.box)
+
+
+@pytest.mark.skipif(_cached("yolo26n_conv2d_f16_weights.tflite") is None
+                    or _cached("samples/sample.jpg") is None,
+                    reason="yolo26n or its sample photo is not cached")
+def test_a_person_cut_off_by_the_frame_is_one_box(monkeypatch):
+    """Why there is NMS: cropped so the people are cut off at the bottom —
+    how the robot sees whoever it talks to — the head gives one of them
+    twice, and the detector keeps one."""
+    from PIL import Image
+
+    import emulator.detector as detector_module
+
+    detector = Detector(Path(_cached("yolo26n_conv2d_f16_weights.tflite")),
+                        threads=2)
+    crop = np.asarray(Image.open(_cached("samples/sample.jpg")).convert("RGB")
+                      .crop((84, 557, 693, 1174)))
+
+    def repeats(found):
+        return [(a, b) for i, a in enumerate(found) for b in found[i + 1:]
+                if a.label == b.label and _iou(a.box, b.box) > 0.9]
+
+    kept = detector.detect(crop)
+    monkeypatch.setattr(detector_module, "non_max_suppression", lambda found: found)
+    assert repeats(detector.detect(crop)), "the head repeats a person here"
+    assert not repeats(kept)
+
+
+def _iou(a, b):
+    width = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    height = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    overlap = width * height
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - overlap
+    return overlap / union if union > 0 else 0.0

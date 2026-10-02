@@ -10,7 +10,7 @@ shape/dtype (moonshine's `classify_decode_inputs`) keep working unchanged.
 Two adapters, because exported `.tflite` files come in two flavours:
 - **named signatures** (moonshine: `encode`, `decode`) — driven by `run_by_name`;
 - **a single default subgraph, no named signatures** — driven by
-  `run_by_index(0, ...)`, the same path `demo/gpu_detect.py` uses for the detector.
+  `run_by_index(0, ...)`.
 
 Only fixed-shape models belong here. The Inflect CPU synthesizer is dynamic-shape
 (it resizes its input per sentence), which is what CompiledModel is *not* built

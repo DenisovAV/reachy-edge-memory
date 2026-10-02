@@ -12,9 +12,11 @@ manifest and checked against the tensors on its sample photo:
 - **Input** `[1, 3, 640, 640]`, NCHW, **RGB in [0, 1]**, letterboxed: scaled
   uniformly to fit, padded bottom/right with gray 114/255.
 - **Output** `[1, 300, 6]`: one row per detection, best first — the box
-  corners (x1, y1, x2, y2) in input pixels, the score, the COCO class. YOLO26
-  is NMS-free: its end-to-end head gives one box per object, so nothing is
-  suppressed here.
+  corners (x1, y1, x2, y2) in input pixels, the score, the COCO class.
+  YOLO26's head is meant to need no NMS, but this export does leave repeats:
+  a person cut off by the bottom of the frame — how the robot sees whoever it
+  talks to — came back twice, 0.74 and 0.31 at 0.97 IoU. Arm's manifest asks
+  for NMS at 0.4, and it is applied here.
 
 That head lowers to INT64 select ops the LiteRT GPU delegate rejects (on the
 Mac's Metal as on the Pi 5's VideoCore), so the detector runs on CPU cores
@@ -32,6 +34,7 @@ import numpy as np
 
 PAD_VALUE = 114.0 / 255.0
 ROW = 6   # x1, y1, x2, y2, score, class
+NMS_IOU = 0.4   # Arm's manifest for this export
 
 
 @dataclasses.dataclass(frozen=True)
@@ -106,6 +109,33 @@ def decode_output(raw: np.ndarray, score_threshold: float,
     ]
 
 
+def _iou(a: tuple[float, ...], b: tuple[float, ...]) -> float:
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    overlap = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    if overlap <= 0.0:
+        return 0.0
+    area_a = (a[2] - a[0]) * (a[3] - a[1])
+    area_b = (b[2] - b[0]) * (b[3] - b[1])
+    union = area_a + area_b - overlap
+    return overlap / union if union > 0 else 0.0
+
+
+def non_max_suppression(detections: list[Detection],
+                        iou_threshold: float = NMS_IOU) -> list[Detection]:
+    """Keep a single box per object.
+
+    Classes are suppressed independently: a person holding a cup occupy the
+    same region of the frame, and both are needed.
+    """
+    kept: list[Detection] = []
+    for candidate in sorted(detections, key=lambda d: d.score, reverse=True):
+        if all(_iou(candidate.box, other.box) <= iou_threshold
+               for other in kept if other.label == candidate.label):
+            kept.append(candidate)
+    return kept
+
+
 def scene_changed(previous: list[Detection],
                   current: list[Detection]) -> bool:
     """Whether the SET of classes in the frame changed.
@@ -145,4 +175,4 @@ class Detector:
         tensor, fit = letterbox(frame, self._size)
         out = self._sig(**{self._in_name: tensor.astype(self._in_dtype.type)})
         raw = next(iter(out.values()))
-        return decode_output(raw, self._threshold, fit)
+        return non_max_suppression(decode_output(raw, self._threshold, fit))

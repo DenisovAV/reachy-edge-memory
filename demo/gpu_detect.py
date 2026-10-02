@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import numpy as np
 from PIL import Image
+
 from demo.detections import detections_to_dicts
 from demo.http_util import ascii_reason
 from emulator import models

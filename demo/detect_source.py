@@ -38,7 +38,7 @@ def frame_to_jpeg(frame: np.ndarray, quality: int = 80) -> bytes:
 
 
 class GpuDetectSource:
-    """Sends camera frames to the GPU detect service, holds the latest snapshot.
+    """Sends camera frames to the laptop's detect service, holds the latest snapshot.
 
     `latest()` always returns a list (even after an error — an empty one), so
     consumers (the voice loop, the display) never have to handle None. The
@@ -90,9 +90,9 @@ class GpuDetectSource:
         return self._consecutive_failures < MAX_CONSECUTIVE_FAILURES
 
     def _post_detect(self, frame: np.ndarray) -> list[dict] | None:
-        """POST a frame to gpu_detect. None means a failure (service/GPU
-        unreachable), [] means the service responded but found nothing
-        (empty scene)."""
+        """POST a frame to gpu_detect. None means a failure (the service
+        unreachable or failing), [] means the service responded but found
+        nothing (empty scene)."""
         try:
             req = urllib.request.Request(
                 self.detect_url, data=frame_to_jpeg(frame),
@@ -104,7 +104,7 @@ class GpuDetectSource:
                 # FaceTracker).
                 self._latest_faces = list(resp.get("faces", []))
             return resp.get("detections", [])
-        except Exception as exc:  # noqa: BLE001 — the GPU may drop out, don't kill the loop
+        except Exception as exc:  # noqa: BLE001 — the service may drop out, don't kill the loop
             LOG.warning("gpu_detect POST failed: %s: %s", type(exc).__name__, exc)
             return None
 
@@ -163,7 +163,7 @@ class LocalDetectSource(GpuDetectSource):
     is inherited untouched; only the step that turns one frame into boxes
     changes. That is the spec's requirement for a local detector: the same
     boxes at the same cadence, not the same object as the Mac's service
-    (which is demo/gpu_detect.py's GpuDetector, a different class entirely).
+    (demo/gpu_detect.py, which serves the same emulator/detector.Detector).
 
     Faces ride along on the same cycle for the same reason they do remotely:
     the head tracker (demo/run_demo.py's FaceTracker) is fed from them four
