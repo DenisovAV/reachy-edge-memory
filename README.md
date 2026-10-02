@@ -9,8 +9,9 @@ no network.
 Every model runs on a laptop by default and is called over HTTP — the language
 model because it does not fit on the robot's Raspberry Pi CM4, the others
 because they are faster there (they can be moved, below); everything the robot
-remembers is stored and searched on the robot. The talk this demo was built for, with the robot live on stage:
-[Vector Space Stream, "Robots and Qdrant Edge"](https://www.youtube.com/watch?v=PxGlBlqTxJI&t=3709s).
+remembers is stored and searched on the robot. The talk this demo was built
+for, with the robot live on stage: [Vector Space Stream, "Robots and Qdrant
+Edge"](https://www.youtube.com/watch?v=PxGlBlqTxJI&t=3709s).
 
 ## How it works
 
@@ -65,12 +66,12 @@ uv run python -m emulator.models      # download every model up front
 
 Download them up front: otherwise the first start fetches about 5 GB — Gemma 4
 E2B, SigLIP 2 and Whisper — while `stage` waits four minutes for the models to
-come up, and on a slower connection it gives up first. The face embedder, HSFace, has no ready-made LiteRT build: this step
-builds it from its PyTorch weights (about two minutes, once, with PyTorch in a
-temporary environment, not the project's). Skip the step and the first
-`stage` does it. If it cannot be built, `stage` says so and goes on with faces
-off: the robot still talks, remembers and recalls, it just calls everyone
-"Person".
+come up, and on a slower connection it gives up first. The face embedder,
+HSFace, has no ready-made LiteRT build: this step builds it from its PyTorch
+weights (about two minutes, once, with PyTorch in a temporary environment, not
+the project's). Skip the step and the first `stage` does it. If it cannot be
+built, `stage` says so and goes on with faces off: the robot still talks,
+remembers and recalls, it just calls everyone "Person".
 
 ## Run it without a robot
 
@@ -129,9 +130,9 @@ uv run python -m demo.stage --robot --robot-host <robot-ip>
 This starts the laptop's services, starts the robot's camera and microphone
 service (the Pollen daemon's own apps lose the camera while it runs), copies
 `demo/` and `emulator/` to the robot, wakes it, sets its volume to 100%, and
-starts the voice loop there (`scripts/robot_service.sh voice-start`). The dashboard is at
-`http://<laptop-ip>:8091`; its Stream button puts the robot to sleep and wakes
-it again. Ctrl-C stops everything and puts the robot to sleep.
+starts the voice loop there (`scripts/robot_service.sh voice-start`). The
+dashboard is at `http://<laptop-ip>:8091`; its Stream button puts the robot to
+sleep and wakes it again. Ctrl-C stops everything and puts the robot to sleep.
 
 The robot's memory lives on its own disk, in `~/reachy-demo/memory`, and stays
 there between runs. The dashboard's Restart button wipes it and starts over;
@@ -183,12 +184,12 @@ front of the laptop.
 
 ## Security
 
-**Run this on a network you trust, and nowhere else.** None of the services
-has authentication. The laptop's model services bind every interface, so the
-robot can reach them — with `--sim` too; anyone else on the network can too —
-to run the models, or, with `--robot`, to read the dashboard, which shows the
-robot's camera and what it remembers. The
-robot's camera service does the same with its live camera and microphone.
+**Run this on a network you trust, and nowhere else.** None of the services has
+authentication. The laptop's model services bind every interface, so the robot
+can reach them — with `--sim` too; anyone else on the network can too — to run
+the models, or, with `--robot`, to read the dashboard, which shows the robot's
+camera and what it remembers. The robot's camera service does the same with its
+live camera and microphone.
 
 The dashboard refuses requests addressed to anything but an IP address,
 localhost, a single-label or `.local` name, or the laptop's own host name
