@@ -6,9 +6,10 @@ itself, in [Qdrant Edge](https://qdrant.tech/documentation/edge/): an embedded
 vector database that runs inside the robot's own process, with no server and
 no network.
 
-The models that do not fit on the robot's Raspberry Pi CM4 run on a laptop and
-are called over HTTP; everything the robot remembers is stored and searched on
-the robot. The talk this demo was built for, with the robot live on stage:
+Every model runs on a laptop by default and is called over HTTP — the language
+model because it does not fit on the robot's Raspberry Pi CM4, the others
+because they are faster there (they can be moved, below); everything the robot
+remembers is stored and searched on the robot. The talk this demo was built for, with the robot live on stage:
 [Vector Space Stream, "Robots and Qdrant Edge"](https://www.youtube.com/watch?v=PxGlBlqTxJI&t=3709s).
 
 ## How it works
@@ -42,7 +43,7 @@ the robot. The talk this demo was built for, with the robot live on stage:
   fact is stored with several phrasings of the questions it answers, as a
   multivector.
 
-Any model can be moved onto the robot instead (`--on-robot`, below) except the
+Any model can be moved onto the robot instead (`ON_ROBOT=`, below) except the
 language model: Gemma 4 E2B is 2.5 GB, plus its context cache, against about
 3 GB free on the robot.
 
@@ -62,9 +63,9 @@ uv sync
 uv run python -m emulator.models      # download every model up front
 ```
 
-Download them up front: otherwise the first start fetches about 3 GB while
-`stage` waits for the models to come up, and on a slower connection it gives
-up first. The face embedder, HSFace, has no ready-made LiteRT build: this step
+Download them up front: otherwise the first start fetches about 5 GB — Gemma 4
+E2B, SigLIP 2 and Whisper — while `stage` waits four minutes for the models to
+come up, and on a slower connection it gives up first. The face embedder, HSFace, has no ready-made LiteRT build: this step
 builds it from its PyTorch weights (about two minutes, once, with PyTorch in a
 temporary environment, not the project's). Skip the step and the first
 `stage` does it. If it cannot be built, `stage` says so and goes on with faces
@@ -88,8 +89,8 @@ mjpython -m reachy_mini.daemon.app.main --sim --no-media
 uv run python -m demo.stage --sim
 ```
 
-Open <http://127.0.0.1:8091> and talk to it. The first start takes a minute
-while the models load; the voice loop starts once they are up, and `stage`
+Open <http://127.0.0.1:8091> and talk to it. The first start takes a minute or
+two while the models load; the voice loop starts once they are up, and `stage`
 says when it listens. It uses the system's default camera and microphone; for
 another one, pass `--video` / `--audio` with the index
 `ffmpeg -f avfoundation -list_devices true -i ""` prints. Ctrl-C stops it all.
@@ -116,7 +117,7 @@ Once, on the robot: the voice loop runs in the robot daemon's own Python, which
 needs Qdrant Edge and Pillow.
 
 ```bash
-ssh pollen@<robot-ip> /venvs/mini_daemon/bin/pip install qdrant-edge-py pillow
+ssh pollen@<robot-ip> /venvs/mini_daemon/bin/python3 -m pip install qdrant-edge-py pillow
 ```
 
 Then, on the laptop:
@@ -125,9 +126,10 @@ Then, on the laptop:
 uv run python -m demo.stage --robot --robot-host <robot-ip>
 ```
 
-This starts the laptop's services, copies `demo/` and `emulator/` to the robot,
-starts its camera and microphone service, wakes it, and starts the voice loop
-there (`scripts/robot_service.sh voice-start`). The dashboard is at
+This starts the laptop's services, starts the robot's camera and microphone
+service (the Pollen daemon's own apps lose the camera while it runs), copies
+`demo/` and `emulator/` to the robot, wakes it, sets its volume to 100%, and
+starts the voice loop there (`scripts/robot_service.sh voice-start`). The dashboard is at
 `http://<laptop-ip>:8091`; its Stream button puts the robot to sleep and wakes
 it again. Ctrl-C stops everything and puts the robot to sleep.
 
@@ -149,7 +151,8 @@ if it cannot; `embedder` has the robot download SigLIP 2 and bge itself on
 first use; `tts` installs espeak-ng with `sudo`.
 The start log says where each model runs. The detector on the robot takes
 about 0.6 s a frame on two of its four cores; recognition on the robot is
-moonshine-tiny rather than Whisper, so it is faster there and less accurate.
+moonshine-tiny rather than Whisper — the one small enough to run there — and it
+is less accurate.
 To rehearse a placement without starting anything:
 
 ```bash
@@ -162,26 +165,36 @@ Each kind of question is answered from a different place:
 
 | Say | Answered from |
 |---|---|
-| "What do you see?", "Look to your left. What's there?" | the camera, right now — the head turns first |
+| "What do you see?", "Look to your left. What's there?" | the camera, right now — for left or right, the head turns there first |
 | "What was on your left?", "What did I show you?" | the frames in `memory` |
 | "What did we talk about?" | the conversation, and what moved out of it into `memory` |
 | "Do you remember me?" | the face in front of it, matched in `people` |
 | "What is Qdrant Edge?", "How does your memory work?" | `knowledge` |
 | "Nod", "Show me you're happy" | nothing: the robot moves |
 
-A face it has not met yet is asked its name, and remembered under it.
+A face it does not recognise is asked its name once the robot has answered what
+was said; the next thing said is taken as the name, and the face is stored
+under it in `people`. A name it cannot make out is not stored, and it asks
+again on a later turn. This needs the face models.
+
+With `--sim` the camera is the laptop's: it does not move with the simulated
+head, so "look to your left" turns the head on screen and shows what is in
+front of the laptop.
 
 ## Security
 
 **Run this on a network you trust, and nowhere else.** None of the services
-has authentication. The laptop's services bind every interface, so the robot
-can reach them; anyone else on the network can too — to run the models, or to
-read the dashboard, which shows the robot's camera and what it remembers. The
+has authentication. The laptop's model services bind every interface, so the
+robot can reach them — with `--sim` too; anyone else on the network can too —
+to run the models, or, with `--robot`, to read the dashboard, which shows the
+robot's camera and what it remembers. The
 robot's camera service does the same with its live camera and microphone.
 
-The dashboard refuses requests addressed to a host name it is not reached by
-(which stops a web page from reaching it through DNS rebinding) and refuses a
-button press from any page but its own; it has no other protection.
+The dashboard refuses requests addressed to anything but an IP address,
+localhost, a single-label or `.local` name, or the laptop's own host name
+(which stops a web page on another domain from reaching it through DNS
+rebinding) and refuses a button press from any page but its own; it has no
+other protection.
 
 ## Tests
 
