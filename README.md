@@ -6,12 +6,10 @@ itself, in [Qdrant Edge](https://qdrant.tech/documentation/edge/): an embedded
 vector database that runs inside the robot's own process, with no server and
 no network.
 
-Every model runs on a laptop by default and is called over HTTP — the language
-model because it does not fit on the robot's Raspberry Pi CM4, the others
-because they are faster there (they can be moved, below); everything the robot
-remembers is stored and searched on the robot. The talk this demo was built
-for, with the robot live on stage: [Vector Space Stream, "Robots and Qdrant
-Edge"](https://www.youtube.com/watch?v=PxGlBlqTxJI&t=3709s).
+Every model runs on a laptop by default and is called over HTTP, and everything
+the robot remembers is stored and searched on the robot. The talk this demo was
+built for, with the robot live on stage: [Vector Space Stream, "Robots and
+Qdrant Edge"](https://www.youtube.com/watch?v=PxGlBlqTxJI&t=3709s).
 
 ## How it works
 
@@ -44,9 +42,10 @@ Edge"](https://www.youtube.com/watch?v=PxGlBlqTxJI&t=3709s).
   fact is stored with several phrasings of the questions it answers, as a
   multivector.
 
-Any model can be moved onto the robot instead (`ON_ROBOT=`, below) except the
-language model: Gemma 4 E2B is 2.5 GB, plus its context cache, against about
-3 GB free on the robot.
+The models run on the laptop because they are faster there. Any of them can be
+moved onto the robot instead (`ON_ROBOT=`, below) except the language model:
+Gemma 4 E2B is 2.5 GB, plus its context cache, against about 3 GB free on the
+robot.
 
 ## Requirements
 
@@ -173,10 +172,10 @@ Each kind of question is answered from a different place:
 | "What is Qdrant Edge?", "How does your memory work?" | `knowledge` |
 | "Nod", "Show me you're happy" | nothing: the robot moves |
 
-A face it does not recognise is asked its name once the robot has answered what
-was said; the next thing said is taken as the name, and the face is stored
-under it in `people`. A name it cannot make out is not stored, and it asks
-again on a later turn. This needs the face models.
+A face that is clearly nobody it has met is asked its name once the robot has
+answered what was said; the next thing said is taken as the name, and the face
+is stored under it in `people`. A name it cannot make out is not stored, and it
+asks again on a later turn. This needs the face models.
 
 With `--sim` the camera is the laptop's: it does not move with the simulated
 head, so "look to your left" turns the head on screen and shows what is in
@@ -186,10 +185,11 @@ front of the laptop.
 
 **Run this on a network you trust, and nowhere else.** None of the services has
 authentication. The laptop's model services bind every interface, so the robot
-can reach them — with `--sim` too; anyone else on the network can too — to run
-the models, or, with `--robot`, to read the dashboard, which shows the robot's
-camera and what it remembers. The robot's camera service does the same with its
-live camera and microphone.
+can reach them, and so can anyone else on the network, to run the models; they
+do so with `--sim` too. With `--robot` the dashboard does the same, and anyone
+on the network can read it: it shows the robot's camera and what it remembers.
+The robot's camera service is open the same way, with its live camera and
+microphone.
 
 The dashboard refuses requests addressed to anything but an IP address,
 localhost, a single-label or `.local` name, or the laptop's own host name
