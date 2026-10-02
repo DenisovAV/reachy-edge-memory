@@ -43,9 +43,10 @@ class Model:
 
 
 MODELS: dict[str, Model] = {
-    # YOLOX-Tiny, COCO, Apache-2.0. See emulator/detector.py for its contract.
-    "yolox-tiny": Model(repo="litert-community/yolox-tiny-litert",
-                        file="yolox_tiny.tflite"),
+    # YOLO26n, COCO, AGPL-3.0, in Arm's LiteRT export. See
+    # emulator/detector.py for its contract.
+    "yolo26n": Model(repo="Arm/yolo26n-fp16-litert",
+                     file="yolo26n_conv2d_f16_weights.tflite"),
     # Speech recognition when it runs on the robot (the laptop uses Whisper,
     # emulator/whisper_asr.py). The tokenizer is the original model's.
     "moonshine-tiny": Model(repo="litert-community/moonshine-tiny",
@@ -72,7 +73,7 @@ MODELS: dict[str, Model] = {
 }
 
 # Which model each stage uses. Swap a stage = change one name here.
-DETECTOR = "yolox-tiny"
+DETECTOR = "yolo26n"
 ASR = "moonshine-tiny"
 TTS = "inflect-nano-v2"
 LLM = "gemma-4-e2b"

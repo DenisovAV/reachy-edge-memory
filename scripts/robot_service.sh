@@ -142,7 +142,7 @@ if [ -n "$ON_ROBOT" ]; then
   # downloading mid-demo, and loads it offline (models.fetch tries the
   # cache first).
   models=""
-  case ",$ON_ROBOT," in *,detector,*) models="$models yolox-tiny";; esac
+  case ",$ON_ROBOT," in *,detector,*) models="$models yolo26n";; esac
   case ",$ON_ROBOT," in
     *,faces,*)
       models="$models yunet"

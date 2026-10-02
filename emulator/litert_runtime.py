@@ -132,7 +132,7 @@ class _IndexSignature:
     carries the shape and dtype. Names are synthesized (`in0`, `out0`, …) so the
     interface matches _NamedSignature — a single-input model reads back one key.
 
-    The YOLOX-Tiny export the detector loads DOES have a named signature (`serving_default`), so `CompiledRunner.only()`
+    The YOLO26n export the detector loads DOES have a named signature (`serving_default`), so `CompiledRunner.only()`
     returns `_NamedSignature` for it (the `len(self._names) == 1` branch), not
     this class. This path exists for the general no-named-signature case and is
     currently exercised only by tests that construct a model with no

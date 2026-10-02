@@ -63,11 +63,11 @@ def test_read_reshapes_flat_buffer_to_meta_shape():
 
 
 def test_read_computes_count_as_product_of_shape():
-    # YOLOX-Tiny's head: [1, 3549, 85] -> 301665 elements in a single flat read.
-    meta = {"shape": (1, 3549, 85), "dtype": np.dtype(np.float32)}
-    flat = np.zeros(1 * 3549 * 85, dtype=np.float32)
+    # YOLO26n's head: [1, 300, 6] -> 1800 elements in a single flat read.
+    meta = {"shape": (1, 300, 6), "dtype": np.dtype(np.float32)}
+    flat = np.zeros(1 * 300 * 6, dtype=np.float32)
     out = _read(FakeBuffer(flat), meta)
-    assert out.shape == (1, 3549, 85)
+    assert out.shape == (1, 300, 6)
 
 
 def test_read_passes_meta_dtype_type_to_buffer_read():
@@ -240,7 +240,7 @@ def test_interpreter_runner_only_returns_the_single_signature(monkeypatch):
 
 
 def test_interpreter_runner_only_drives_tensors_when_nothing_is_named(monkeypatch):
-    # The YOLOX-Tiny export names its signature, but a model with none is driven
+    # The YOLO26n export names its signature, but a model with none is driven
     # by tensor index — the same case _IndexSignature covers for CompiledModel.
     fake = FakeInterpreter(
         signatures={},

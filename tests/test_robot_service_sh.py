@@ -250,7 +250,7 @@ def test_each_family_brings_what_it_calls():
 
 def test_only_the_named_families_models_are_carried():
     block = _prepare_block()
-    for family, model in (("detector", "yolox-tiny"), ("faces", "yunet"),
+    for family, model in (("detector", "yolo26n"), ("faces", "yunet"),
                           ("asr", "moonshine-tokenizer"),
                           ("tts", "inflect-nano-v2")):
         case = block.index(f"*,{family},*")

@@ -848,9 +848,9 @@ def _talk(heard, detections, endpoint, robot, display, conversation, *,
 MEMORY_VECTORS = {"text": 384, "image": 768}
 
 # Threads for the detector when it runs on the robot. Measured there on a
-# 640x480 photo, yolox-tiny takes 892 ms on one thread, 587 ms on two, 513 ms
-# on three and 531 ms on four: past two, a core buys little, and the other two
-# go to the voice loop and the Pollen daemon, which share the same four.
+# 640x480 photo, yolo26n takes 969 ms on one thread, 634 ms on two, 591 ms on
+# three and 616 ms on four: past two, a core buys little, and the other two go
+# to the voice loop and the Pollen daemon, which share the same four.
 LOCAL_DETECTOR_THREADS = 2
 
 

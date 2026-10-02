@@ -11,15 +11,15 @@ from emulator import models
 
 
 def test_get_returns_the_named_model():
-    m = models.get("yolox-tiny")
-    assert m.repo == "litert-community/yolox-tiny-litert"
-    assert m.file == "yolox_tiny.tflite"
+    m = models.get("yolo26n")
+    assert m.repo == "Arm/yolo26n-fp16-litert"
+    assert m.file == "yolo26n_conv2d_f16_weights.tflite"
 
 
 def test_get_unknown_name_raises_and_lists_known_names():
     with pytest.raises(KeyError) as exc:
         models.get("does-not-exist")
-    assert "yolox-tiny" in str(exc.value)
+    assert "yolo26n" in str(exc.value)
 
 
 def test_every_stage_default_resolves():

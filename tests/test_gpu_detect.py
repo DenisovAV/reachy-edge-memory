@@ -1,5 +1,5 @@
 """demo/gpu_detect.py's HTTP handler, with a stand-in detector: a real
-GpuDetector needs a GPU, and make_handler only ever calls .detect().
+Objects needs the detector model, and make_handler only ever calls .detect().
 """
 from __future__ import annotations
 
@@ -18,10 +18,10 @@ def test_parse_args_host_defaults_to_all_interfaces():
     assert parse_args([]).host == "0.0.0.0"
 
 
-# --- HTTP handler: a fake detector standing in for a real GpuDetector ---
+# --- HTTP handler: a fake detector standing in for a real Objects ---
 
 class FakeDetector:
-    """Stand-in for GpuDetector — make_handler doesn't check the type, only calls .detect()."""
+    """Stand-in for Objects — make_handler doesn't check the type, only calls .detect()."""
 
     def __init__(self, dets=None):
         self._dets = dets if dets is not None else [
