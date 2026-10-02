@@ -1,9 +1,10 @@
-"""The detector: YOLOX-Tiny's input and output contract, duplicate
+"""The detector: YOLO26n's input and output contract, duplicate
 suppression, and what counts as a change of scene.
 
 The preparation and decoding are tested on synthetic tensors; the model
-itself runs in test_detector_finds_people_in_the_models_own_sample_photo when it is in the
-local Hugging Face cache (it is skipped otherwise, never downloaded here).
+itself runs in the last three tests — the sample photo, and two crops of it
+that pin why there is NMS and why at 0.7 — when it is in the local Hugging
+Face cache (they are skipped otherwise, never downloaded here).
 """
 
 from pathlib import Path
@@ -15,15 +16,13 @@ from emulator.detector import (
     Detection,
     Detector,
     Letterbox,
-    build_grid,
-    decode_yolox_output,
+    decode_output,
     letterbox,
     non_max_suppression,
     scene_changed,
 )
 
-SIZE = 416
-ROWS = (52 * 52) + (26 * 26) + (13 * 13)   # 3549
+SIZE = 640
 
 
 def det(label: int, score: float = 0.9) -> Detection:
@@ -53,32 +52,32 @@ def test_empty_to_empty_is_not_a_change():
     assert not scene_changed([], [])
 
 
-# --- letterbox: raw BGR pixels, scaled to fit, padded with 114 ---
+# --- letterbox: RGB in [0, 1], NCHW, scaled to fit, padded with 114/255 ---
 
-def test_letterbox_keeps_raw_pixel_values_and_flips_to_bgr():
+def test_letterbox_scales_to_unit_range_keeps_rgb_and_puts_channels_first():
     frame = np.zeros((SIZE, SIZE, 3), np.uint8)
-    frame[..., 0] = 200            # red
+    frame[..., 0] = 255            # red
     tensor, fit = letterbox(frame, SIZE)
-    assert tensor.shape == (1, SIZE, SIZE, 3) and tensor.dtype == np.float32
-    # Not divided by 255: this model reads raw pixels, and BGR, not RGB.
-    assert tensor[0, 10, 10, 2] == pytest.approx(200)
-    assert tensor[0, 10, 10, 0] == pytest.approx(0)
+    assert tensor.shape == (1, 3, SIZE, SIZE) and tensor.dtype == np.float32
+    assert tensor[0, 0, 10, 10] == pytest.approx(1.0)     # R, first channel
+    assert tensor[0, 2, 10, 10] == pytest.approx(0.0)     # B
     assert fit == Letterbox(ratio=1.0, frame_width=SIZE, frame_height=SIZE)
 
 
 def test_letterbox_fits_a_wide_frame_and_pads_the_bottom():
-    frame = np.full((540, 960, 3), 10, np.uint8)
+    frame = np.full((540, 960, 3), 51, np.uint8)
     tensor, fit = letterbox(frame, SIZE)
+    assert (fit.frame_width, fit.frame_height) == (960, 540)
     assert fit.ratio == pytest.approx(SIZE / 960)
-    height = round(540 * fit.ratio)            # 234 rows of picture
-    assert tensor[0, height - 1, 0, 0] == pytest.approx(10)
-    assert tensor[0, height + 1, 0, 0] == pytest.approx(114)
+    height = round(540 * fit.ratio)            # 360 rows of picture
+    assert tensor[0, 0, height - 1, 0] == pytest.approx(51 / 255)
+    assert tensor[0, 0, height + 1, 0] == pytest.approx(114 / 255)
 
 
-def test_letterbox_scales_a_unit_float_frame_up():
+def test_letterbox_takes_a_unit_float_frame_as_it_is():
     frame = np.full((SIZE, SIZE, 3), 0.5, np.float32)
     tensor, _ = letterbox(frame, SIZE)
-    assert tensor[0, 0, 0, 0] == pytest.approx(127, abs=1)
+    assert tensor[0, 0, 0, 0] == pytest.approx(0.5, abs=0.01)
 
 
 def test_letterbox_refuses_a_frame_without_three_channels():
@@ -86,103 +85,86 @@ def test_letterbox_refuses_a_frame_without_three_channels():
         letterbox(np.zeros((SIZE, SIZE), np.uint8), SIZE)
 
 
-# --- decoding the raw head: [1, 3549, 85], boxes in grid units ---
+# --- decoding the end-to-end head: [1, 300, 6], corners in input pixels ---
 
-def _raw():
-    return np.zeros((1, ROWS, 85), np.float32)
-
-
-def _set(raw, row, *, offset=(0.5, 0.5), log_size=(0.0, 0.0), obj=0.9,
-         label=0, class_score=0.9):
-    raw[0, row, 0:2] = offset
-    raw[0, row, 2:4] = log_size
-    raw[0, row, 4] = obj
-    raw[0, row, 5 + label] = class_score
+def _raw(*rows):
+    raw = np.zeros((1, 300, 6), np.float32)
+    for i, row in enumerate(rows):
+        raw[0, i] = row
+    return raw
 
 
-def _row_for(stride, gx, gy):
-    """The output row of grid cell (gx, gy) at a stride."""
-    start = 0
-    for s in (8, 16, 32):
-        side = SIZE // s
-        if s == stride:
-            return start + gy * side + gx
-        start += side * side
-    raise ValueError(stride)
-
-
-def test_grid_has_one_row_per_cell_at_three_strides():
-    grid, strides = build_grid(SIZE)
-    assert grid.shape == (ROWS, 2) and strides.shape == (ROWS, 1)
-    assert tuple(grid[_row_for(32, 3, 5)]) == (3, 5)
-    assert strides[_row_for(32, 3, 5), 0] == 32
-
-
-def test_decode_applies_the_grid_and_maps_back_to_the_frame():
-    raw = _raw()
-    # A 32-px box centred on cell (3, 5) at stride 32: centre (112, 176).
-    _set(raw, _row_for(32, 3, 5), log_size=(0.0, 0.0), label=41)
+def test_decode_maps_input_pixels_back_to_frame_fractions():
+    # A cup at (96..128, 160..192) on a canvas the frame was halved into.
+    raw = _raw((96, 160, 128, 192, 0.8, 41))
     fit = Letterbox(ratio=0.5, frame_width=832, frame_height=832)
-    [found] = decode_yolox_output(raw, 0.3, SIZE, fit)
-    assert found.label == 41
-    # Canvas (96..128, 160..192) / ratio 0.5 = frame pixels, / 832.
+    [found] = decode_output(raw, 0.3, fit)
+    assert found.label == 41 and found.score == pytest.approx(0.8)
     assert found.box == pytest.approx((192 / 832, 320 / 832, 256 / 832, 384 / 832))
 
 
-def test_decode_scores_objectness_times_class():
-    raw = _raw()
-    _set(raw, 0, obj=0.5, class_score=0.5)       # 0.25: under the threshold
-    _set(raw, 1, obj=0.9, class_score=0.8)       # 0.72
-    fit = Letterbox(1.0, SIZE, SIZE)
-    found = decode_yolox_output(raw, 0.3, SIZE, fit)
-    assert [round(d.score, 2) for d in found] == [0.72]
+def test_decode_maps_a_landscape_frame_without_mixing_width_and_height():
+    # A 1280x720 frame halved into the canvas: 640x360 of picture.
+    raw = _raw((320, 90, 480, 270, 0.8, 0))
+    [found] = decode_output(raw, 0.3, Letterbox(0.5, frame_width=1280, frame_height=720))
+    assert found.box == pytest.approx((0.5, 0.25, 0.75, 0.75))
+
+
+def test_decode_drops_what_is_under_the_threshold():
+    raw = _raw((0, 0, 10, 10, 0.9, 0), (0, 0, 10, 10, 0.25, 0))
+    found = decode_output(raw, 0.3, Letterbox(1.0, SIZE, SIZE))
+    assert [round(d.score, 2) for d in found] == [0.9]
+
+
+def test_decode_returns_every_row_over_the_threshold():
+    # Overlapping or not: suppressing repeats is the next step, not this one.
+    raw = _raw((0, 0, 100, 100, 0.9, 0), (5, 5, 105, 105, 0.8, 0))
+    assert len(decode_output(raw, 0.3, Letterbox(1.0, SIZE, SIZE))) == 2
 
 
 def test_decode_clips_boxes_to_the_frame():
-    raw = _raw()
-    _set(raw, _row_for(32, 0, 0), log_size=(3.0, 3.0))    # far wider than the frame
-    [found] = decode_yolox_output(raw, 0.3, SIZE, Letterbox(1.0, SIZE, SIZE))
-    assert all(0.0 <= v <= 1.0 for v in found.box)
+    raw = _raw((-50, -50, 900, 900, 0.9, 0))
+    [found] = decode_output(raw, 0.3, Letterbox(1.0, SIZE, SIZE))
+    assert found.box == (0.0, 0.0, 1.0, 1.0)
 
 
-def test_decode_returns_nothing_under_the_threshold():
-    assert decode_yolox_output(_raw(), 0.3, SIZE, Letterbox(1.0, SIZE, SIZE)) == []
+def test_decode_returns_nothing_for_an_empty_scene():
+    assert decode_output(_raw(), 0.3, Letterbox(1.0, SIZE, SIZE)) == []
 
 
 def test_decode_refuses_an_output_it_does_not_understand():
     with pytest.raises(ValueError):
-        decode_yolox_output(np.zeros((1, 84, 8400), np.float32), 0.3, SIZE,
-                            Letterbox(1.0, SIZE, SIZE))
+        decode_output(np.zeros((1, 84, 8400), np.float32), 0.3,
+                      Letterbox(1.0, SIZE, SIZE))
     with pytest.raises(ValueError):
-        decode_yolox_output(np.zeros((1, 100, 85), np.float32), 0.3, SIZE,
-                            Letterbox(1.0, SIZE, SIZE))
+        decode_output(np.zeros((1, 3549, 85), np.float32), 0.3,
+                      Letterbox(1.0, SIZE, SIZE))
 
 
 # --- duplicate suppression ---
 
 def test_nms_collapses_overlapping_boxes_of_same_class():
-    a = Detection(label=15, score=0.9, box=(0.1, 0.1, 0.5, 0.5))
-    b = Detection(label=15, score=0.7, box=(0.12, 0.12, 0.52, 0.52))
-    kept = non_max_suppression([a, b], iou_threshold=0.5)
-    assert len(kept) == 1
-    assert kept[0].score == 0.9, "the most confident detection must be kept"
+    a = Detection(label=0, score=0.74, box=(0.1, 0.5, 0.3, 1.0))
+    b = Detection(label=0, score=0.31, box=(0.1, 0.51, 0.3, 1.0))
+    kept = non_max_suppression([b, a])
+    assert kept == [a], "the most confident detection must be kept"
 
 
 def test_nms_keeps_distant_boxes():
-    a = Detection(label=15, score=0.9, box=(0.0, 0.0, 0.2, 0.2))
-    b = Detection(label=15, score=0.8, box=(0.7, 0.7, 0.9, 0.9))
-    assert len(non_max_suppression([a, b], iou_threshold=0.5)) == 2
+    a = Detection(label=0, score=0.9, box=(0.0, 0.0, 0.2, 0.2))
+    b = Detection(label=0, score=0.8, box=(0.7, 0.7, 0.9, 0.9))
+    assert len(non_max_suppression([a, b])) == 2
 
 
 def test_nms_keeps_different_classes_at_same_place():
-    # A person holding a dog occupy the same region — both are needed.
+    # A person and the cup they hold occupy the same region — both are needed.
     a = Detection(label=0, score=0.9, box=(0.1, 0.1, 0.5, 0.5))
-    b = Detection(label=15, score=0.8, box=(0.1, 0.1, 0.5, 0.5))
-    assert len(non_max_suppression([a, b], iou_threshold=0.5)) == 2
+    b = Detection(label=41, score=0.8, box=(0.1, 0.1, 0.5, 0.5))
+    assert len(non_max_suppression([a, b])) == 2
 
 
 def test_nms_handles_empty_input():
-    assert non_max_suppression([], iou_threshold=0.5) == []
+    assert non_max_suppression([]) == []
 
 
 # --- Detector: the runner, and a real frame ---
@@ -195,7 +177,7 @@ class _FakeSig:
         return {"images": {"shape": self._shape, "dtype": np.dtype(np.float32)}}
 
 
-def _fake_runner(captured, shape=(1, SIZE, SIZE, 3)):
+def _fake_runner(captured, shape=(1, 3, SIZE, SIZE)):
     class FakeRunner:
         def __init__(self, model_path, threads=4, **kwargs):
             captured["threads"] = threads
@@ -214,27 +196,130 @@ def test_detector_reads_its_input_size_and_forwards_threads(monkeypatch):
     assert captured["threads"] == 2
 
 
+def test_detector_refuses_an_input_that_is_not_three_square_channels(monkeypatch):
+    for shape in ((1, 4, SIZE, SIZE), (1, 3, SIZE, SIZE // 2)):
+        monkeypatch.setattr("emulator.litert_runtime.build_runner",
+                            _fake_runner({}, shape=shape))
+        with pytest.raises(ValueError):
+            Detector(Path("fake.tflite"))
+
+
+class _CannedSig(_FakeSig):
+    """A head that answers every frame with the same rows."""
+
+    def __init__(self, raw):
+        super().__init__((1, 3, SIZE, SIZE))
+        self.raw, self.seen = raw, None
+
+    def __call__(self, **inputs):
+        self.seen = inputs
+        return {"output_0": self.raw}
+
+
+def test_detect_drops_a_repeat_but_keeps_two_people_one_behind_the_other(monkeypatch):
+    # The overlaps the module docstring measured: repeats at 0.81 IoU or more,
+    # two different people at up to 0.52. Canvas pixels of a 1280x720 frame.
+    sig = _CannedSig(_raw((20, 40, 180, 340, 0.9, 0),       # a person
+                          (20, 94, 180, 340, 0.6, 0),       # the head repeating them, IoU 0.82
+                          (250, 40, 450, 340, 0.8, 0),      # a second person ...
+                          (313, 40, 513, 340, 0.7, 0),      # ... one half behind them, IoU 0.52
+                          (560, 200, 620, 260, 0.45, 41)))  # a cup under this threshold
+
+    class Runner:
+        def __init__(self, model_path, threads=4, **kwargs):
+            pass
+
+        def only(self):
+            return sig
+
+    monkeypatch.setattr("emulator.litert_runtime.build_runner", Runner)
+    found = Detector(Path("fake.tflite"), score_threshold=0.5).detect(
+        np.zeros((720, 1280, 3), np.uint8))
+    assert [(d.label, d.score) for d in found] == [
+        (0, pytest.approx(0.9)), (0, pytest.approx(0.8)), (0, pytest.approx(0.7))]
+    assert found[0].box == pytest.approx((20 / 640, 40 / 360, 180 / 640, 340 / 360))
+    assert sig.seen["images"].shape == (1, 3, SIZE, SIZE)
+
+
 def _cached(filename):
     try:
         from huggingface_hub import hf_hub_download
 
-        return hf_hub_download("litert-community/yolox-tiny-litert", filename,
+        return hf_hub_download("Arm/yolo26n-fp16-litert", filename,
                                local_files_only=True)
     except Exception:  # noqa: BLE001 — not cached: skip rather than download
         return None
 
 
-@pytest.mark.skipif(_cached("yolox_tiny.tflite") is None
-                    or _cached("samples/sample.png") is None,
-                    reason="yolox-tiny or its sample photo is not cached")
+@pytest.mark.skipif(_cached("yolo26n_conv2d_f16_weights.tflite") is None
+                    or _cached("samples/sample.jpg") is None,
+                    reason="yolo26n or its sample photo is not cached")
 def test_detector_finds_people_in_the_models_own_sample_photo():
-    """The one check that the whole path — letterbox, model, decode — sees
-    what a camera sees: a scrambled input or a wrong channel order finds
-    nothing here."""
+    """The whole path — letterbox, model, decode — on the model's own photo:
+    the people it shows, where they stand. A frame fed as raw 0–255 finds
+    "people" everywhere and a scrambled layout finds none; a channel-order
+    mix-up cannot be told apart on this photo (the synthetic letterbox tests
+    pin that)."""
     from PIL import Image
 
-    photo = np.asarray(Image.open(_cached("samples/sample.png")).convert("RGB"))
-    found = Detector(Path(_cached("yolox_tiny.tflite")), threads=2).detect(photo)
+    photo = np.asarray(Image.open(_cached("samples/sample.jpg")).convert("RGB"))
+    found = Detector(Path(_cached("yolo26n_conv2d_f16_weights.tflite")),
+                     threads=2).detect(photo)
     people = [d for d in found if d.label == 0]
-    assert people and max(d.score for d in people) > 0.5
+    assert 6 <= len(people) <= 8
+    # The man at the left edge, wherever he ranks.
+    assert any(_iou(d.box, (0.015, 0.76, 0.11, 0.93)) > 0.8 for d in people)
     assert all(0.0 <= v <= 1.0 for d in found for v in d.box)
+
+
+@pytest.mark.skipif(_cached("yolo26n_conv2d_f16_weights.tflite") is None
+                    or _cached("samples/sample.jpg") is None,
+                    reason="yolo26n or its sample photo is not cached")
+def test_a_person_cut_off_by_the_frame_is_one_box(monkeypatch):
+    """Why there is NMS: cropped so the people are cut off at the bottom —
+    how the robot sees whoever it talks to — the head gives one of them
+    twice, and the detector keeps one. Looked for at 0.1, not at the 0.3 the
+    robot uses: there the repeat scores 0.31, and a re-encoded JPEG or a new
+    Pillow would move it under."""
+    from PIL import Image
+
+    import emulator.detector as detector_module
+
+    detector = Detector(Path(_cached("yolo26n_conv2d_f16_weights.tflite")),
+                        threads=2, score_threshold=0.1)
+    crop = np.asarray(Image.open(_cached("samples/sample.jpg")).convert("RGB")
+                      .crop((84, 557, 693, 1174)))
+
+    def repeats(found):
+        return [(a, b) for i, a in enumerate(found) for b in found[i + 1:]
+                if a.label == b.label and _iou(a.box, b.box) > 0.9]
+
+    kept = detector.detect(crop)
+    monkeypatch.setattr(detector_module, "non_max_suppression", lambda found: found)
+    assert repeats(detector.detect(crop)), "the head repeats a person here"
+    assert not repeats(kept)
+
+
+@pytest.mark.skipif(_cached("yolo26n_conv2d_f16_weights.tflite") is None
+                    or _cached("samples/sample.jpg") is None,
+                    reason="yolo26n or its sample photo is not cached")
+def test_a_person_partly_behind_another_is_still_two():
+    """Why NMS is not at the 0.4 Arm's manifest names: here a man stands
+    half behind another, their boxes at 0.47 IoU — two people."""
+    from PIL import Image
+
+    detector = Detector(Path(_cached("yolo26n_conv2d_f16_weights.tflite")),
+                        threads=2)
+    crop = np.asarray(Image.open(_cached("samples/sample.jpg")).convert("RGB")
+                      .crop((9, 496, 386, 1115)))
+    people = [d for d in detector.detect(crop) if d.label == 0]
+    assert any(0.4 < _iou(a.box, b.box) < 0.7
+               for i, a in enumerate(people) for b in people[i + 1:])
+
+
+def _iou(a, b):
+    width = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    height = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    overlap = width * height
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - overlap
+    return overlap / union if union > 0 else 0.0

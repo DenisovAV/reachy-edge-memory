@@ -83,12 +83,12 @@ def test_the_report_carries_the_model_name_and_the_address():
 
 
 def test_a_missing_local_model_names_the_family_placement_and_cause():
-    exc = placement.missing("detector", "yolox_tiny.tflite",
+    exc = placement.missing("detector", "yolo26n_conv2d_f16_weights.tflite",
                             "FileNotFoundError")
     message = str(exc)
     assert "object detector" in message
     assert "on the robot" in message
-    assert "yolox_tiny.tflite" in message
+    assert "yolo26n_conv2d_f16_weights.tflite" in message
     assert "FileNotFoundError" in message
 
 
@@ -184,7 +184,7 @@ def test_a_detector_placed_on_the_robot_that_cannot_load_stops_the_start(monkeyp
 
     class Broken:
         def __init__(self, *a, **kw):
-            raise FileNotFoundError("yolox_tiny.tflite")
+            raise FileNotFoundError("yolo26n_conv2d_f16_weights.tflite")
 
     monkeypatch.setattr("emulator.detector.Detector", Broken)
     monkeypatch.setattr("emulator.models.fetch", lambda name: name)
@@ -193,7 +193,7 @@ def test_a_detector_placed_on_the_robot_that_cannot_load_stops_the_start(monkeyp
                                      detect_url="http://mac:9600/detect")
     message = str(exc.value)
     assert "object detector" in message and "on the robot" in message
-    assert "yolox_tiny.tflite" in message
+    assert "yolo26n_conv2d_f16_weights.tflite" in message
 
 
 def test_a_local_detector_with_the_faces_on_the_laptop_still_follows_faces(monkeypatch):

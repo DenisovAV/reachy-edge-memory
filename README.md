@@ -19,7 +19,7 @@ Qdrant Edge"](https://www.youtube.com/watch?v=PxGlBlqTxJI&t=3709s).
  │ voice loop       demo/run_demo.py    │  HTTP    │ demo/serve.py                    │
  │  listen → look → remember → answer   │ ───────▶ │  Whisper · Gemma 4 E2B · Inflect │
  │                                      │          │ demo/gpu_detect.py               │
- │ Qdrant Edge, three shards            │          │  YOLOX-Tiny (GPU) · YuNet        │
+ │ Qdrant Edge, three shards            │          │  YOLO26n · YuNet                 │
  │  memory/    what was said and seen   │          │ demo/embed_service.py            │
  │  people/    who it has met           │          │  SigLIP 2 · bge-small · HSFace   │
  │  knowledge/ what it was taught       │          │                                  │
@@ -229,4 +229,5 @@ No robot, camera or model download needed.
 ## License
 
 Apache-2.0 (see `LICENSE`). The models and several libraries have their own
-licenses, and the voice uses GPL-licensed libraries at run time — see `NOTICE`.
+licenses: the object detector, YOLO26n, is AGPL-3.0, and the voice uses
+GPL-licensed libraries at run time — see `NOTICE`.

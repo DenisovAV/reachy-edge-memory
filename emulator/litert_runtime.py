@@ -10,7 +10,7 @@ shape/dtype (moonshine's `classify_decode_inputs`) keep working unchanged.
 Two adapters, because exported `.tflite` files come in two flavours:
 - **named signatures** (moonshine: `encode`, `decode`) — driven by `run_by_name`;
 - **a single default subgraph, no named signatures** — driven by
-  `run_by_index(0, ...)`, the same path `demo/gpu_detect.py` uses for the detector.
+  `run_by_index(0, ...)`.
 
 Only fixed-shape models belong here. The Inflect CPU synthesizer is dynamic-shape
 (it resizes its input per sentence), which is what CompiledModel is *not* built
@@ -132,7 +132,7 @@ class _IndexSignature:
     carries the shape and dtype. Names are synthesized (`in0`, `out0`, …) so the
     interface matches _NamedSignature — a single-input model reads back one key.
 
-    The YOLOX-Tiny export the detector loads DOES have a named signature (`serving_default`), so `CompiledRunner.only()`
+    The YOLO26n export the detector loads DOES have a named signature (`serving_default`), so `CompiledRunner.only()`
     returns `_NamedSignature` for it (the `len(self._names) == 1` branch), not
     this class. This path exists for the general no-named-signature case and is
     currently exercised only by tests that construct a model with no
@@ -176,7 +176,7 @@ class CompiledRunner:
                  threads: int = 4) -> None:
         # CompiledModel defaults to CpuOptions(num_threads=1); the old
         # Interpreter path ran 4 threads. Without this the CPU stages regress
-        # ~1.75–2.6× (detector 181→316 ms). Pass the thread count explicitly.
+        # ~1.75–2.6×. Pass the thread count explicitly.
         if accel == HardwareAccelerator.CPU:
             options = Options(hardware_accelerators=HardwareAccelerator.CPU,
                               cpu_options=CpuOptions(num_threads=threads))
@@ -293,5 +293,5 @@ def build_runner(model_path, *, accel: HardwareAccelerator = HardwareAccelerator
             "LiteRT's GPU accelerator cannot run on this processor: it is "
             "built with the ARMv8 crypto extensions and this CPU has none "
             f"(see compiled_model_runs_here, {RUNNER_ENV} overrides). Run the "
-            "detector on the CPU, or on a board whose CPU has them.")
+            "model on the CPU, or on a board whose CPU has them.")
     return InterpreterRunner(model_path, threads=threads)

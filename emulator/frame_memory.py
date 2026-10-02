@@ -206,7 +206,7 @@ class FrameMemory:
     never seen returns nothing.
 
     Called from two threads with no coordination of their own: SceneChangeWriter
-    (below) drives `remember()` off the GPU detect thread while the voice
+    (below) drives `remember()` off the detect thread while the voice
     thread's turn handler alternates `recall()`/`remember()` (see
     demo/run_demo.py's `_handle_stream`). Neither the Qdrant Edge shard
     nor `self._next_id` synchronises itself — a plain read-modify-write racing

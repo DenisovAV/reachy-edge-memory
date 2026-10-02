@@ -46,7 +46,7 @@ MAX_CONSECUTIVE_FAILURES = 5
 
 # Bounded wait for a single GET so a hung/dead service can't stall the
 # poll loop forever — mirrors GpuDetectSource's urlopen(timeout=5), shorter
-# here since a frame fetch has much less work to do than a GPU detect pass.
+# here since a frame fetch has much less work to do than a detect pass.
 DEFAULT_TIMEOUT_S = 2.0
 DEFAULT_POLL_INTERVAL_S = 0.1
 

@@ -9,7 +9,10 @@ repository.
 Models, fetched from Hugging Face at run time
 ---------------------------------------------
 - Gemma 4 E2B (litert-community/gemma-4-E2B-it-litert-lm) — Apache-2.0
-- YOLOX-Tiny, Megvii (litert-community/yolox-tiny-litert) — Apache-2.0
+- YOLO26n, Ultralytics, in Arm's LiteRT export (Arm/yolo26n-fp16-litert) —
+  AGPL-3.0. The object detector; downloaded and run, never redistributed
+  here. If you redistribute it, or modify it and let others use it over a
+  network, the AGPL applies to that.
 - Moonshine Tiny, Useful Sensors (litert-community/moonshine-tiny,
   UsefulSensors/moonshine-tiny) — MIT
 - Inflect-Nano-v2 (litert-community/Inflect-Nano-v2, from

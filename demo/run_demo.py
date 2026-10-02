@@ -848,9 +848,9 @@ def _talk(heard, detections, endpoint, robot, display, conversation, *,
 MEMORY_VECTORS = {"text": 384, "image": 768}
 
 # Threads for the detector when it runs on the robot. Measured there on a
-# 640x480 photo, yolox-tiny takes 892 ms on one thread, 587 ms on two, 513 ms
-# on three and 531 ms on four: past two, a core buys little, and the other two
-# go to the voice loop and the Pollen daemon, which share the same four.
+# 640x480 photo, yolo26n takes 969 ms on one thread, 634 ms on two, 591 ms on
+# three and 616 ms on four: past two, a core buys little, and the other two go
+# to the voice loop and the Pollen daemon, which share the same four.
 LOCAL_DETECTOR_THREADS = 2
 
 
@@ -1407,7 +1407,7 @@ def run_voice(args, endpoint) -> int:
                   f"Just talk — Ctrl-C to quit.\n")
         # Health of the vision path, surfaced once per transition below. The
         # signals (GpuDetectSource.healthy(), CameraStream.alive) exist for
-        # exactly this — without reading them a sustained GPU/camera outage is
+        # exactly this — without reading them a sustained detector/camera outage is
         # invisible beyond the detect thread's per-cycle warnings.
         detect_healthy = True
         camera_alive = True
@@ -1442,9 +1442,9 @@ def run_voice(args, endpoint) -> int:
             frame, detections = source.latest()
             if source.healthy() != detect_healthy:
                 detect_healthy = source.healthy()
-                print("  vision: GPU detect "
+                print("  vision: object detection "
                       + ("recovered" if detect_healthy
-                         else "unreachable — continuing without detections"))
+                         else "failing — continuing without detections"))
             camera_now = getattr(camera, "alive", True)
             if camera_now != camera_alive:
                 camera_alive = camera_now

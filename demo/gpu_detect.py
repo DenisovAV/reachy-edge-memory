@@ -1,10 +1,10 @@
 """Detection service on the laptop: a JPEG frame in, object and face boxes out.
 
 The robot's detect loop (demo/detect_source.py) posts a frame here about four
-times a second. The detector runs on the GPU through LiteRT's CompiledModel —
-the YOLOX-Tiny export is GPU-clean, the whole graph on the accelerator — and
-the decode and NMS run on the CPU (emulator/detector.py). Faces ride along:
-YuNet boxes from the same frame keep the robot's head on the person.
+times a second. The detector runs on the laptop's CPU cores, about 20 ms a
+frame: YOLO26n's end-to-end head does not compile for the GPU
+(emulator/detector.py). Faces ride along: YuNet boxes from the same frame keep
+the robot's head on the person.
 """
 from __future__ import annotations
 
@@ -17,13 +17,11 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import numpy as np
 from PIL import Image
-from ai_edge_litert.compiled_model import CompiledModel, HardwareAccelerator
 
 from demo.detections import detections_to_dicts
 from demo.http_util import ascii_reason
 from emulator import models
-from emulator.detector import (decode_yolox_output, letterbox,
-                               non_max_suppression)
+from emulator.detector import Detector
 
 # Decompression-bomb guard: demo frames are under 1 Mpx.
 Image.MAX_IMAGE_PIXELS = 10_000_000
@@ -33,31 +31,16 @@ LOG = logging.getLogger(__name__)
 MAX_BODY = 4 * 1024 * 1024  # overflow guard: /detect request body size limit
 
 
-class GpuDetector:
-    def __init__(self, model_path: str, score_threshold: float = 0.3,
-                 iou_threshold: float = 0.45) -> None:
-        self._m = CompiledModel.from_file(
-            model_path, hardware_accel=HardwareAccelerator.GPU)
-        self._ib = self._m.create_input_buffers(0)
-        self._ob = self._m.create_output_buffers(0)
-        _, self._size, width, _ = (
-            int(x) for x in self._ib[0].get_tensor_details()["shape"])
-        if width != self._size:
-            raise SystemExit(f"expected a square detector input, got "
-                             f"{self._size}x{width}")
-        self._out_shape = tuple(
-            int(x) for x in self._ob[0].get_tensor_details()["shape"])
-        self._thr = score_threshold
-        self._iou = iou_threshold
+class Objects:
+    """The detector on the frames the robot posts."""
+
+    def __init__(self, model_path: str, score_threshold: float = 0.3) -> None:
+        self._detector = Detector(model_path, threads=4,
+                                  score_threshold=score_threshold)
 
     def detect(self, jpeg: bytes) -> list[dict]:
         frame = np.asarray(Image.open(io.BytesIO(jpeg)).convert("RGB"))
-        tensor, fit = letterbox(frame, self._size)
-        self._ib[0].write(tensor)
-        self._m.run_by_index(0, self._ib, self._ob)
-        raw = self._ob[0].read(self._out_shape, np.float32)
-        found = decode_yolox_output(raw, self._thr, self._size, fit)
-        return detections_to_dicts(non_max_suppression(found, self._iou))
+        return detections_to_dicts(self._detector.detect(frame))
 
 
 class Faces:
@@ -88,7 +71,7 @@ class Faces:
                 for face in self._reader.read(frame, embed=False)]
 
 
-def make_handler(detector: GpuDetector, faces=None):
+def make_handler(detector: Objects, faces=None):
     class Handler(BaseHTTPRequestHandler):
         # Single-threaded HTTPServer (one worker) — the timeout stops a
         # hung/slow client from permanently hogging the only socket.
@@ -163,10 +146,10 @@ def main(argv=None) -> int:
 
     setup_logging()
     args = parse_args(argv)
-    detector = GpuDetector(args.model or str(models.fetch(models.DETECTOR)))
+    detector = Objects(args.model or str(models.fetch(models.DETECTOR)))
     server = HTTPServer((args.host, args.port), make_handler(detector, Faces()))
     print(f"gpu_detect on {args.host}:{args.port}: {models.DETECTOR} on the "
-          "GPU", flush=True)
+          "CPU", flush=True)
     server.serve_forever()
     return 0
 
