@@ -57,7 +57,7 @@ language model: Gemma 4 E2B is 2.5 GB, plus its context cache, against about
   network. No robot? The simulator below stands in for it.
 
 ```bash
-git clone https://github.com/DenisovAV/reachy-edge-memory.git && cd reachy-edge-memory
+git clone https://github.com/qdrant-labs/reachy-edge-memory.git && cd reachy-edge-memory
 uv sync
 uv run python -m emulator.models      # download every model up front
 ```
@@ -94,6 +94,10 @@ says when it listens. It uses the system's default camera and microphone; for
 another one, pass `--video` / `--audio` with the index
 `ffmpeg -f avfoundation -list_devices true -i ""` prints. Ctrl-C stops it all.
 
+What it remembers lives in `results/memory` and stays there between runs. The
+dashboard's Restart button wipes it and starts over; the previous memory is
+kept once, as `results/memory-previous`.
+
 ## Run it with a Raspberry Pi 5 — coming soon
 
 The models on a Raspberry Pi 5 instead of the laptop, the robot simulated on
@@ -127,9 +131,9 @@ there (`scripts/robot_service.sh voice-start`). The dashboard is at
 `http://<laptop-ip>:8091`; its Stream button puts the robot to sleep and wakes
 it again. Ctrl-C stops everything and puts the robot to sleep.
 
-The robot's memory lives on its own disk, in `~/reachy-demo/memory`. The
-dashboard's Restart button wipes it and starts over; the previous memory is
-kept once, as `memory-previous`.
+The robot's memory lives on its own disk, in `~/reachy-demo/memory`, and stays
+there between runs. The dashboard's Restart button wipes it and starts over;
+the previous memory is kept once, as `memory-previous`.
 
 ### Moving models onto the robot
 
@@ -151,6 +155,21 @@ To rehearse a placement without starting anything:
 ```bash
 ROBOT=<robot-ip> ON_ROBOT=detector,asr scripts/robot_service.sh prepare
 ```
+
+## What to ask it
+
+Each kind of question is answered from a different place:
+
+| Say | Answered from |
+|---|---|
+| "What do you see?", "Look to your left. What's there?" | the camera, right now — the head turns first |
+| "What was on your left?", "What did I show you?" | the frames in `memory` |
+| "What did we talk about?" | the conversation, and what moved out of it into `memory` |
+| "Do you remember me?" | the face in front of it, matched in `people` |
+| "What is Qdrant Edge?", "How does your memory work?" | `knowledge` |
+| "Nod", "Show me you're happy" | nothing: the robot moves |
+
+A face it has not met yet is asked its name, and remembered under it.
 
 ## Security
 
@@ -185,6 +204,13 @@ No robot, camera or model download needed.
 | `demo/display/` | the dashboard |
 | `emulator/models.py` | the models' files, by name, and where they come from |
 | `emulator/edge_store.py`, `memory.py`, `frame_memory.py`, `face_memory.py` | the Qdrant Edge shards |
+
+## See also
+
+- [Qdrant Edge](https://qdrant.tech/documentation/edge/) — the documentation.
+- [edge-mission-control](https://github.com/qdrant-labs/edge-mission-control) —
+  another Qdrant Edge demo: a home robot's patrol, played from video, where
+  every object it sees becomes a searchable memory.
 
 ## License
 
